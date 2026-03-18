@@ -17,7 +17,7 @@ func main() {
 		zoneDir    = flag.String("zone-dir", "", "Path to zone directory (default: auto-detect)")
 		command    = flag.String("cmd", "index", "Command: index, list, search, export")
 		assetMap   = flag.String("map", "", "Map name (e.g., zm_tomb)")
-		assetType  = flag.String("type", "", "Asset type: weapon, xmodel, perk")
+		assetType  = flag.String("type", "", "Asset type(s): weapon, xmodel, perk, material, image (comma-separated for multiple)")
 		format     = flag.String("format", "plain", "Export format: plain, json, csv, gsc")
 		output     = flag.String("output", "", "Output file (default: stdout)")
 		useCache   = flag.Bool("cache", true, "Use caching for decrypted files")
@@ -269,14 +269,21 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType string) {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "Debug: Total assets before type filter = %d\n", len(assets))
-
-	// Filter by type if specified
+	// Filter by type if specified (supports comma-separated list)
 	if assetType != "" {
 		var filtered []*t6assets.Asset
-		targetType := parseAssetType(assetType)
+		// Parse comma-separated types
+		typeList := strings.Split(assetType, ",")
+		validTypes := make(map[t6assets.AssetType]bool)
+		for _, t := range typeList {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				validTypes[parseAssetType(t)] = true
+			}
+		}
+
 		for _, a := range assets {
-			if a.Type == targetType {
+			if validTypes[a.Type] {
 				filtered = append(filtered, a)
 			}
 		}
@@ -306,10 +313,17 @@ func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap str
 			continue
 		}
 
-		// Filter by type
+		// Filter by type (supports comma-separated list)
 		if assetType != "" {
-			targetType := parseAssetType(assetType)
-			if a.Type != targetType {
+			typeList := strings.Split(assetType, ",")
+			validTypes := make(map[t6assets.AssetType]bool)
+			for _, t := range typeList {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					validTypes[parseAssetType(t)] = true
+				}
+			}
+			if !validTypes[a.Type] {
 				continue
 			}
 		}
@@ -343,12 +357,20 @@ func exportAssets(registry *t6assets.Registry, sourceMap, assetType, format, out
 		}
 	}
 
-	// Filter by type
+	// Filter by type (supports comma-separated list)
 	if assetType != "" {
 		var filtered []*t6assets.Asset
-		targetType := parseAssetType(assetType)
+		typeList := strings.Split(assetType, ",")
+		validTypes := make(map[t6assets.AssetType]bool)
+		for _, t := range typeList {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				validTypes[parseAssetType(t)] = true
+			}
+		}
+
 		for _, a := range assets {
-			if a.Type == targetType {
+			if validTypes[a.Type] {
 				filtered = append(filtered, a)
 			}
 		}
