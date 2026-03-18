@@ -26,6 +26,7 @@ func main() {
 		clearCache  = flag.Bool("clear-cache", false, "Clear cache before running")
 		ignoreCase  = flag.Bool("i", false, "Case-insensitive search")
 		showVersion = flag.Bool("version", false, "Show version and exit")
+		sortBy      = flag.String("sort", "name", "Sort output by: name, type, source")
 	)
 	flag.Parse()
 
@@ -78,7 +79,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		listAssets(registry, *assetMap, *assetType)
+		listAssets(registry, *assetMap, *assetType, *sortBy)
 
 	case "search":
 		if len(flag.Args()) == 0 {
@@ -90,7 +91,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		searchAssets(registry, flag.Args()[0], *assetType, *assetMap, *ignoreCase)
+		searchAssets(registry, flag.Args()[0], *assetType, *assetMap, *ignoreCase, *sortBy)
 
 	case "export":
 		err := indexFastFiles(zonePath, registry, *useCache)
@@ -98,7 +99,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		err = exportAssets(registry, *assetMap, *assetType, *format, *output)
+		err = exportAssets(registry, *assetMap, *assetType, *format, *output, *sortBy)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error exporting: %v\n", err)
 			os.Exit(1)
@@ -265,7 +266,7 @@ func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool)
 	return nil
 }
 
-func listAssets(registry *t6assets.Registry, sourceMap, assetType string) {
+func listAssets(registry *t6assets.Registry, sourceMap, assetType, sortBy string) {
 	var assets []*t6assets.Asset
 
 	if sourceMap != "" {
@@ -298,6 +299,9 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType string) {
 		assets = filtered
 	}
 
+	// Sort assets
+	sortAssets(assets, sortBy)
+
 	// Print
 	for _, a := range assets {
 		fmt.Printf("[%s] %s (from %s)\n", a.Type, a.Name, a.Source)
@@ -306,7 +310,7 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType string) {
 	fmt.Printf("\nTotal: %d assets\n", len(assets))
 }
 
-func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap string, ignoreCase bool) {
+func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap string, ignoreCase bool, sortBy string) {
 	var results []*t6assets.Asset
 
 	for _, a := range registry.Assets {
@@ -346,6 +350,9 @@ func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap str
 		results = append(results, a)
 	}
 
+	// Sort results
+	sortAssets(results, sortBy)
+
 	for _, a := range results {
 		fmt.Printf("[%s] %s (from %s)\n", a.Type, a.Name, a.Source)
 	}
@@ -353,7 +360,7 @@ func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap str
 	fmt.Printf("\nFound: %d matches\n", len(results))
 }
 
-func exportAssets(registry *t6assets.Registry, sourceMap, assetType, format, output string) error {
+func exportAssets(registry *t6assets.Registry, sourceMap, assetType, format, output, sortBy string) error {
 	// Get assets to export
 	var assets []*t6assets.Asset
 
@@ -384,6 +391,9 @@ func exportAssets(registry *t6assets.Registry, sourceMap, assetType, format, out
 		}
 		assets = filtered
 	}
+
+	// Sort assets
+	sortAssets(assets, sortBy)
 
 	// Determine output
 	out := os.Stdout
@@ -482,6 +492,42 @@ func containsIgnoreCase(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// sortAssets sorts assets by the specified criteria
+func sortAssets(assets []*t6assets.Asset, sortBy string) {
+	switch sortBy {
+	case "name":
+		// Sort by name (already default, but make it explicit)
+		for i := 0; i < len(assets); i++ {
+			for j := i + 1; j < len(assets); j++ {
+				if assets[i].Name > assets[j].Name {
+					assets[i], assets[j] = assets[j], assets[i]
+				}
+			}
+		}
+	case "type":
+		// Sort by type, then by name
+		for i := 0; i < len(assets); i++ {
+			for j := i + 1; j < len(assets); j++ {
+				if assets[i].Type > assets[j].Type ||
+					(assets[i].Type == assets[j].Type && assets[i].Name > assets[j].Name) {
+					assets[i], assets[j] = assets[j], assets[i]
+				}
+			}
+		}
+	case "source":
+		// Sort by source, then by name
+		for i := 0; i < len(assets); i++ {
+			for j := i + 1; j < len(assets); j++ {
+				if assets[i].Source > assets[j].Source ||
+					(assets[i].Source == assets[j].Source && assets[i].Name > assets[j].Name) {
+					assets[i], assets[j] = assets[j], assets[i]
+				}
+			}
+		}
+	}
+	// If sortBy is not recognized, leave unsorted (defaults to name order from index)
 }
 
 // createZoneDataFromAssetNames creates synthetic zone data from OAT asset names
