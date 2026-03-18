@@ -3,12 +3,14 @@ package fastfile
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // OATIntegration handles OpenAssetTools integration for FastFile decryption
@@ -34,14 +36,20 @@ func (oat *OATIntegration) ListAssets(inputPath string) ([]string, map[string]st
 		return nil, nil, fmt.Errorf("OpenAssetTools not found")
 	}
 
-	// Use OAT.Unlinker with --list flag
-	cmd := exec.Command(
+	// Use OAT.Unlinker with --list flag and 30-second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx,
 		oat.oatPath,
 		inputPath,
 		"--list",
 	)
 
 	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, nil, fmt.Errorf("OAT list timed out after 30 seconds")
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("OAT list failed: %w\nOutput: %s", err, string(output))
 	}
@@ -69,6 +77,110 @@ func (oat *OATIntegration) ListAssets(inputPath string) ([]string, map[string]st
 			// Only include assets we're interested in
 			switch assetType {
 			case "xmodel", "weapon", "material", "image", "fx":
+				assetNames = append(assetNames, assetName)
+				assetTypes[assetName] = assetType
+			}
+		}
+	}
+
+	return assetNames, assetTypes, nil
+}
+
+// ExtractAndParseZone uses OAT to dump the FastFile and parse the zone file
+// This gives us access to ALL assets including perks
+func (oat *OATIntegration) ExtractAndParseZone(inputPath string) ([]string, map[string]string, error) {
+	if !oat.IsAvailable() {
+		return nil, nil, fmt.Errorf("OpenAssetTools not found")
+	}
+
+	// Create temp directory for extraction
+	tempDir, err := os.MkdirTemp("", "t6-oat-extract-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Run OAT.Unlinker to extract with a 30-second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx,
+		oat.oatPath,
+		inputPath,
+		"-o", tempDir,
+	)
+
+	// Run extraction (ignore errors as OAT may complain about missing dependencies)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, nil, fmt.Errorf("OAT extraction timed out after 30 seconds")
+	}
+	_ = output // Ignore output for now
+	_ = err    // Ignore errors as OAT may complain about missing dependencies
+
+	// Find the zone file
+	baseName := filepath.Base(inputPath)
+	zoneName := strings.TrimSuffix(baseName, ".ff")
+
+	// OAT creates output directly in tempDir (not in "extracted" subdirectory as previously thought)
+	zoneFilePath := filepath.Join(tempDir, "zone_source", zoneName+".zone")
+
+	// Check if zone file was created
+	if _, err := os.Stat(zoneFilePath); os.IsNotExist(err) {
+		return nil, nil, fmt.Errorf("zone file not found at %s", zoneFilePath)
+	}
+
+	// Parse the zone file
+	return oat.parseZoneFile(zoneFilePath)
+}
+
+// parseZoneFile parses a .zone file and extracts all asset references
+func (oat *OATIntegration) parseZoneFile(zoneFilePath string) ([]string, map[string]string, error) {
+	data, err := os.ReadFile(zoneFilePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read zone file: %w", err)
+	}
+
+	var assetNames []string
+	assetTypes := make(map[string]string)
+	seen := make(map[string]bool) // Track duplicates
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Skip comments and empty lines
+		if line == "" || strings.HasPrefix(line, "//") || strings.HasPrefix(line, ">") {
+			continue
+		}
+
+		// Parse "type,name" format (zone files use commas)
+		parts := strings.SplitN(line, ",", 2)
+		if len(parts) == 2 {
+			assetType := strings.TrimSpace(parts[0])
+			assetName := strings.TrimSpace(parts[1])
+
+			// Skip empty names
+			if assetName == "" {
+				continue
+			}
+
+			// Check for duplicates
+			if seen[assetName] {
+				continue
+			}
+			seen[assetName] = true
+
+			// Check for perks - they're stored as image/material with specialty_* prefix
+			if strings.HasPrefix(assetName, "specialty_") {
+				assetNames = append(assetNames, assetName)
+				assetTypes[assetName] = "perk"
+				continue
+			}
+
+			// Only include assets we're interested in
+			switch assetType {
+			case "weapon", "xmodel", "material", "image", "fx":
 				assetNames = append(assetNames, assetName)
 				assetTypes[assetName] = assetType
 			}

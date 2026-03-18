@@ -233,3 +233,8 @@ func ReadUint32(data []byte, offset int) uint32 {
 func ReadUint16(data []byte, offset int) uint16 {
 	return binary.LittleEndian.Uint16(data[offset : offset+2])
 }
+
+// FindPerks exports the perk finding functionality for testing
+func (p *Parser) FindPerks(data []byte) []string {
+	return p.findPerks(data)
+}
