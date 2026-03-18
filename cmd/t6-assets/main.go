@@ -12,7 +12,7 @@ import (
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
 )
 
-const version = "0.4.0-dev"
+const version = "0.5.0"
 
 func main() {
 	var (
