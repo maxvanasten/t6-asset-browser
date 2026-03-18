@@ -18,7 +18,7 @@ func main() {
 	var (
 		zoneDir     = flag.String("zone-dir", "", "Path to zone directory (default: auto-detect)")
 		command     = flag.String("cmd", "index", "Command: index, list, search, export")
-		assetMap    = flag.String("map", "", "Map name (e.g., zm_tomb)")
+		assetMap    = flag.String("map", "", "Map name(s) (e.g., zm_tomb or zm_tomb,zm_prison)")
 		assetType   = flag.String("type", "", "Asset type(s): weapon, xmodel, perk, material, image (comma-separated for multiple)")
 		format      = flag.String("format", "plain", "Export format: plain, json, csv, gsc")
 		output      = flag.String("output", "", "Output file (default: stdout)")
@@ -270,7 +270,26 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType, sortBy string
 	var assets []*t6assets.Asset
 
 	if sourceMap != "" {
-		assets = registry.GetBySource(sourceMap + ".ff")
+		// Support comma-separated list of maps
+		mapList := strings.Split(sourceMap, ",")
+		validMaps := make(map[string]bool)
+		for _, m := range mapList {
+			m = strings.TrimSpace(m)
+			if m != "" {
+				// Support both with and without .ff extension
+				if !strings.HasSuffix(m, ".ff") {
+					m = m + ".ff"
+				}
+				validMaps[m] = true
+			}
+		}
+
+		// Get assets from all specified maps
+		for _, a := range registry.Assets {
+			if validMaps[a.Source] {
+				assets = append(assets, a)
+			}
+		}
 	} else {
 		// Get all
 		for _, a := range registry.Assets {
@@ -340,9 +359,21 @@ func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap str
 			}
 		}
 
-		// Filter by map
+		// Filter by map (supports comma-separated list)
 		if sourceMap != "" {
-			if a.Source != sourceMap+".ff" {
+			mapList := strings.Split(sourceMap, ",")
+			validMaps := make(map[string]bool)
+			for _, m := range mapList {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					// Support both with and without .ff extension
+					if !strings.HasSuffix(m, ".ff") {
+						m = m + ".ff"
+					}
+					validMaps[m] = true
+				}
+			}
+			if !validMaps[a.Source] {
 				continue
 			}
 		}
@@ -365,7 +396,26 @@ func exportAssets(registry *t6assets.Registry, sourceMap, assetType, format, out
 	var assets []*t6assets.Asset
 
 	if sourceMap != "" {
-		assets = registry.GetBySource(sourceMap + ".ff")
+		// Support comma-separated list of maps
+		mapList := strings.Split(sourceMap, ",")
+		validMaps := make(map[string]bool)
+		for _, m := range mapList {
+			m = strings.TrimSpace(m)
+			if m != "" {
+				// Support both with and without .ff extension
+				if !strings.HasSuffix(m, ".ff") {
+					m = m + ".ff"
+				}
+				validMaps[m] = true
+			}
+		}
+
+		// Get assets from all specified maps
+		for _, a := range registry.Assets {
+			if validMaps[a.Source] {
+				assets = append(assets, a)
+			}
+		}
 	} else {
 		for _, a := range registry.Assets {
 			assets = append(assets, a)
