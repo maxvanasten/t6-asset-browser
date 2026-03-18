@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/maxvanasten/t6-asset-browser/internal/fastfile"
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
@@ -21,6 +22,7 @@ func main() {
 		output     = flag.String("output", "", "Output file (default: stdout)")
 		useCache   = flag.Bool("cache", true, "Use caching for decrypted files")
 		clearCache = flag.Bool("clear-cache", false, "Clear cache before running")
+		ignoreCase = flag.Bool("i", false, "Case-insensitive search")
 	)
 	flag.Parse()
 
@@ -80,7 +82,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		searchAssets(registry, flag.Args()[0], *assetType, *assetMap)
+		searchAssets(registry, flag.Args()[0], *assetType, *assetMap, *ignoreCase)
 
 	case "export":
 		err := indexFastFiles(zonePath, registry, *useCache)
@@ -289,14 +291,18 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType string) {
 	fmt.Printf("\nTotal: %d assets\n", len(assets))
 }
 
-func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap string) {
-	// TODO: implement pattern matching
-	// For now, simple contains search
+func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap string, ignoreCase bool) {
 	var results []*t6assets.Asset
 
 	for _, a := range registry.Assets {
 		// Check pattern match
-		if !containsIgnoreCase(a.Name, pattern) {
+		var matched bool
+		if ignoreCase {
+			matched = containsIgnoreCase(a.Name, pattern)
+		} else {
+			matched = strings.Contains(a.Name, pattern)
+		}
+		if !matched {
 			continue
 		}
 
