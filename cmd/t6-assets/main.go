@@ -467,6 +467,14 @@ func exportAssets(registry *t6assets.Registry, sourceMap, assetType, format, out
 	// Determine output
 	out := os.Stdout
 	if output != "" {
+		// Validate output path
+		dir := filepath.Dir(output)
+		if dir != "" && dir != "." {
+			if _, err := os.Stat(dir); os.IsNotExist(err) {
+				return fmt.Errorf("output directory does not exist: %s", dir)
+			}
+		}
+
 		f, err := os.Create(output)
 		if err != nil {
 			return fmt.Errorf("failed to create output file: %w", err)
