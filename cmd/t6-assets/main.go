@@ -286,9 +286,15 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType, sortBy string
 		}
 
 		// Get assets from all specified maps
+		seen := make(map[string]bool)
 		for _, a := range registry.Assets {
 			if validMaps[a.Source] {
-				assets = append(assets, a)
+				// Deduplicate by name+type
+				key := a.Name + "|" + a.Type.String()
+				if !seen[key] {
+					assets = append(assets, a)
+					seen[key] = true
+				}
 			}
 		}
 	} else {
@@ -418,9 +424,15 @@ func exportAssets(registry *t6assets.Registry, sourceMap, assetType, format, out
 		}
 
 		// Get assets from all specified maps
+		seen := make(map[string]bool)
 		for _, a := range registry.Assets {
 			if validMaps[a.Source] {
-				assets = append(assets, a)
+				// Deduplicate by name+type
+				key := a.Name + "|" + a.Type.String()
+				if !seen[key] {
+					assets = append(assets, a)
+					seen[key] = true
+				}
 			}
 		}
 	} else {
