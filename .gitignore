@@ -1,6 +1,6 @@
-# Binaries
-t6-assets
-t6-assets.exe
+# Binaries (root level only)
+/t6-assets
+/t6-assets.exe
 dist/
 
 # Go
