@@ -1,0 +1,39 @@
+# Binaries
+t6-assets
+t6-assets.exe
+dist/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+/tmp/
+*.tmp
+*.log
+
+# Test coverage
+*.cover
+*.cov
+coverage.html
+
+# Documentation knowledge base (not part of the tool itself)
+bo2-assets/
+bo2-zombies-assets-reference.md
