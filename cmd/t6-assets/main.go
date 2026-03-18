@@ -12,19 +12,27 @@ import (
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
 )
 
+const version = "0.4.0-dev"
+
 func main() {
 	var (
-		zoneDir    = flag.String("zone-dir", "", "Path to zone directory (default: auto-detect)")
-		command    = flag.String("cmd", "index", "Command: index, list, search, export")
-		assetMap   = flag.String("map", "", "Map name (e.g., zm_tomb)")
-		assetType  = flag.String("type", "", "Asset type(s): weapon, xmodel, perk, material, image (comma-separated for multiple)")
-		format     = flag.String("format", "plain", "Export format: plain, json, csv, gsc")
-		output     = flag.String("output", "", "Output file (default: stdout)")
-		useCache   = flag.Bool("cache", true, "Use caching for decrypted files")
-		clearCache = flag.Bool("clear-cache", false, "Clear cache before running")
-		ignoreCase = flag.Bool("i", false, "Case-insensitive search")
+		zoneDir     = flag.String("zone-dir", "", "Path to zone directory (default: auto-detect)")
+		command     = flag.String("cmd", "index", "Command: index, list, search, export")
+		assetMap    = flag.String("map", "", "Map name (e.g., zm_tomb)")
+		assetType   = flag.String("type", "", "Asset type(s): weapon, xmodel, perk, material, image (comma-separated for multiple)")
+		format      = flag.String("format", "plain", "Export format: plain, json, csv, gsc")
+		output      = flag.String("output", "", "Output file (default: stdout)")
+		useCache    = flag.Bool("cache", true, "Use caching for decrypted files")
+		clearCache  = flag.Bool("clear-cache", false, "Clear cache before running")
+		ignoreCase  = flag.Bool("i", false, "Case-insensitive search")
+		showVersion = flag.Bool("version", false, "Show version and exit")
 	)
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("t6-asset-browser version %s\n", version)
+		os.Exit(0)
+	}
 
 	if *clearCache {
 		cache, err := fastfile.NewCache()
