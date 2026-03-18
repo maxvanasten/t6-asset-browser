@@ -27,6 +27,7 @@ func main() {
 		ignoreCase  = flag.Bool("i", false, "Case-insensitive search")
 		showVersion = flag.Bool("version", false, "Show version and exit")
 		sortBy      = flag.String("sort", "name", "Sort output by: name, type, source")
+		useWildcard = flag.Bool("wildcard", false, "Use wildcard pattern matching (* and ?)")
 	)
 	flag.Parse()
 
@@ -91,7 +92,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		searchAssets(registry, flag.Args()[0], *assetType, *assetMap, *ignoreCase, *sortBy)
+		searchAssets(registry, flag.Args()[0], *assetType, *assetMap, *ignoreCase, *sortBy, *useWildcard)
 
 	case "export":
 		err := indexFastFiles(zonePath, registry, *useCache)
@@ -329,13 +330,19 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType, sortBy string
 	fmt.Printf("\nTotal: %d assets\n", len(assets))
 }
 
-func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap string, ignoreCase bool, sortBy string) {
+func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap string, ignoreCase bool, sortBy string, useWildcard bool) {
 	var results []*t6assets.Asset
 
 	for _, a := range registry.Assets {
 		// Check pattern match
 		var matched bool
-		if ignoreCase {
+		if useWildcard {
+			if ignoreCase {
+				matched = wildcardMatch(strings.ToLower(a.Name), strings.ToLower(pattern))
+			} else {
+				matched = wildcardMatch(a.Name, pattern)
+			}
+		} else if ignoreCase {
 			matched = containsIgnoreCase(a.Name, pattern)
 		} else {
 			matched = strings.Contains(a.Name, pattern)
@@ -578,6 +585,36 @@ func sortAssets(assets []*t6assets.Asset, sortBy string) {
 		}
 	}
 	// If sortBy is not recognized, leave unsorted (defaults to name order from index)
+}
+
+// wildcardMatch matches a string against a pattern with * and ? wildcards
+// * matches any sequence of characters, ? matches any single character
+func wildcardMatch(str, pattern string) bool {
+	// Simple recursive implementation
+	if len(pattern) == 0 {
+		return len(str) == 0
+	}
+
+	if len(str) == 0 {
+		// Pattern can match empty string if it's all *
+		for _, p := range pattern {
+			if p != '*' {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Check first character
+	if pattern[0] == '*' {
+		// * matches any sequence: either skip the * or consume a character
+		return wildcardMatch(str, pattern[1:]) || wildcardMatch(str[1:], pattern)
+	} else if pattern[0] == '?' || pattern[0] == str[0] {
+		// ? matches any single character, or exact match
+		return wildcardMatch(str[1:], pattern[1:])
+	}
+
+	return false
 }
 
 // createZoneDataFromAssetNames creates synthetic zone data from OAT asset names
