@@ -126,6 +126,19 @@ $ t6-assets -cmd=list -map=zm_tomb -type=perk
 Total: 8 assets
 ```
 
+### Example 2b: List with Pattern Filter
+
+```bash
+$ t6-assets -cmd=list -map=zm_tomb -type=weapon -pattern=raygun
+
+[weapon] ray_gun_zm (from zm_tomb.ff)
+[weapon] ray_gun_upgraded_zm (from zm_tomb.ff)
+[weapon] raygun_mark2_zm (from zm_tomb.ff)
+[weapon] raygun_mark2_upgraded_zm (from zm_tomb.ff)
+
+Total: 4 assets
+```
+
 ### Example 3: Search for Raygun Variants
 
 ```bash
@@ -188,6 +201,20 @@ hamr_zm,weapon,zm_tomb.ff
 hamr_upgraded_zm,weapon,zm_tomb.ff
 galil_zm,weapon,zm_tomb.ff
 ...
+```
+
+### Example 7b: Export with Pattern Filter
+
+```bash
+$ t6-assets -cmd=export -map=zm_tomb -type=weapon -pattern=upgraded -format=gsc
+
+array(
+	"870mcs_upgraded_zm",
+	"ak74u_extclip_upgraded_zm",
+	"ak74u_upgraded_zm",
+	"ballista_upgraded_zm",
+	...
+)
 ```
 
 ### Example 8: List All Assets from a Map
@@ -253,6 +280,9 @@ galil_upgraded_zm
 | `-cmd` | Command to run | index |
 | `-map` | Map name filter | (none) |
 | `-type` | Asset type filter | (none) |
+| `-pattern` | Pattern to filter asset names | (none) |
+| `-i` | Case-insensitive pattern matching | false |
+| `-wildcard` | Use wildcards (* and ?) in pattern | false |
 | `-format` | Export format | plain |
 | `-output` | Output file | stdout |
 | `-cache` | Use caching | true |

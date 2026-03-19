@@ -84,7 +84,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		listAssets(registry, *assetMap, *assetType, *sortBy)
+		listAssets(registry, *assetMap, *assetType, *pattern, *sortBy, *ignoreCase, *useWildcard)
 		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
 
 	case "search":
@@ -106,7 +106,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		err = exportAssets(registry, *assetMap, *assetType, *format, *output, *sortBy)
+		err = exportAssets(registry, *assetMap, *assetType, *pattern, *format, *output, *sortBy, *ignoreCase, *useWildcard)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error exporting: %v\n", err)
 			os.Exit(1)
@@ -274,7 +274,7 @@ func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool)
 	return nil
 }
 
-func listAssets(registry *t6assets.Registry, sourceMap, assetType, sortBy string) {
+func listAssets(registry *t6assets.Registry, sourceMap, assetType, pattern string, sortBy string, ignoreCase bool, useWildcard bool) {
 	var assets []*t6assets.Asset
 
 	if sourceMap != "" {
@@ -326,6 +326,29 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType, sortBy string
 
 		for _, a := range assets {
 			if validTypes[a.Type] {
+				filtered = append(filtered, a)
+			}
+		}
+		assets = filtered
+	}
+
+	// Filter by pattern if specified
+	if pattern != "" {
+		var filtered []*t6assets.Asset
+		for _, a := range assets {
+			var matched bool
+			if useWildcard {
+				if ignoreCase {
+					matched = wildcardMatch(strings.ToLower(a.Name), strings.ToLower(pattern))
+				} else {
+					matched = wildcardMatch(a.Name, pattern)
+				}
+			} else if ignoreCase {
+				matched = containsIgnoreCase(a.Name, pattern)
+			} else {
+				matched = strings.Contains(a.Name, pattern)
+			}
+			if matched {
 				filtered = append(filtered, a)
 			}
 		}
@@ -411,7 +434,7 @@ func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap str
 	fmt.Printf("\nFound: %d matches\n", len(results))
 }
 
-func exportAssets(registry *t6assets.Registry, sourceMap, assetType, format, output, sortBy string) error {
+func exportAssets(registry *t6assets.Registry, sourceMap, assetType, pattern string, format, output, sortBy string, ignoreCase bool, useWildcard bool) error {
 	// Get assets to export
 	var assets []*t6assets.Asset
 
@@ -462,6 +485,29 @@ func exportAssets(registry *t6assets.Registry, sourceMap, assetType, format, out
 
 		for _, a := range assets {
 			if validTypes[a.Type] {
+				filtered = append(filtered, a)
+			}
+		}
+		assets = filtered
+	}
+
+	// Filter by pattern if specified
+	if pattern != "" {
+		var filtered []*t6assets.Asset
+		for _, a := range assets {
+			var matched bool
+			if useWildcard {
+				if ignoreCase {
+					matched = wildcardMatch(strings.ToLower(a.Name), strings.ToLower(pattern))
+				} else {
+					matched = wildcardMatch(a.Name, pattern)
+				}
+			} else if ignoreCase {
+				matched = containsIgnoreCase(a.Name, pattern)
+			} else {
+				matched = strings.Contains(a.Name, pattern)
+			}
+			if matched {
 				filtered = append(filtered, a)
 			}
 		}
