@@ -828,7 +828,7 @@ func (m Model) executeQuery() tea.Cmd {
 }
 
 func (m Model) runQuery() tea.Msg {
-	results, err := ExecuteQuery(m.ZonePath, m.Query, m.UseCache)
+	results, err := ExecuteQuery(m.ZonePath, m.Query, m.UseCache, true) // true = silent
 	return LoadCompleteMsg{
 		Assets: results,
 		Error:  err,
@@ -836,7 +836,7 @@ func (m Model) runQuery() tea.Msg {
 }
 
 func (m Model) runExport() tea.Msg {
-	results, err := ExecuteQuery(m.ZonePath, m.Query, m.UseCache)
+	results, err := ExecuteQuery(m.ZonePath, m.Query, m.UseCache, true) // true = silent
 	if err != nil {
 		return ExportCompleteMsg{
 			Error: err,
@@ -856,7 +856,7 @@ func (m Model) runExport() tea.Msg {
 	}
 }
 
-func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6assets.Asset, error) {
+func ExecuteQuery(zonePath string, query QueryConfig, useCache bool, silent bool) ([]*t6assets.Asset, error) {
 	registry := t6assets.NewRegistry()
 
 	var filesToProcess []string
@@ -880,17 +880,19 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 				}
 			}
 		}
-		if len(filesToProcess) > 0 {
+		if len(filesToProcess) > 0 && !silent {
 			fmt.Fprintf(os.Stderr, "Processing %d files matching '%s'\n", len(filesToProcess), query.Map)
 		}
 	}
 
 	if len(filesToProcess) == 0 {
 		filesToProcess, _ = filepath.Glob(filepath.Join(zonePath, "*.ff"))
-		fmt.Fprintf(os.Stderr, "Processing all %d files\n", len(filesToProcess))
+		if !silent {
+			fmt.Fprintf(os.Stderr, "Processing all %d files\n", len(filesToProcess))
+		}
 	}
 
-	if err := indexFilesParallel(filesToProcess, registry, useCache); err != nil {
+	if err := indexFilesParallel(filesToProcess, registry, useCache, silent); err != nil {
 		return nil, fmt.Errorf("failed to index FastFiles: %w", err)
 	}
 
@@ -959,7 +961,7 @@ func filterAssets(registry *t6assets.Registry, query QueryConfig) []*t6assets.As
 	return results
 }
 
-func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache bool) error {
+func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache bool, silent bool) error {
 	if len(ffFiles) == 0 {
 		return fmt.Errorf("no files to process")
 	}
@@ -970,7 +972,7 @@ func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache 
 	}
 
 	oat := fastfile.NewOATIntegration()
-	if oat.IsAvailable() {
+	if oat.IsAvailable() && !silent {
 		fmt.Fprintf(os.Stderr, "Using OpenAssetTools for decryption\n")
 	}
 
@@ -1013,13 +1015,15 @@ func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache 
 				processedCount++
 				current := processedCount
 
-				// Print while holding lock to prevent interleaved output
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "[%d/%d] Error processing %s: %v\n",
-						current, totalFiles, fileName, err)
-				} else {
-					fmt.Fprintf(os.Stderr, "[%d/%d] Indexed: %s (%d assets)\n",
-						current, totalFiles, fileName, len(assets))
+				// Print while holding lock to prevent interleaved output (only if not silent)
+				if !silent {
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "[%d/%d] Error processing %s: %v\n",
+							current, totalFiles, fileName, err)
+					} else {
+						fmt.Fprintf(os.Stderr, "[%d/%d] Indexed: %s (%d assets)\n",
+							current, totalFiles, fileName, len(assets))
+					}
 				}
 				mu.Unlock()
 
@@ -1045,8 +1049,10 @@ func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache 
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "Total: %d files processed, %d assets indexed in %v\n",
-		totalFiles, len(registry.Assets), time.Since(startTime))
+	if !silent {
+		fmt.Fprintf(os.Stderr, "Total: %d files processed, %d assets indexed in %v\n",
+			totalFiles, len(registry.Assets), time.Since(startTime))
+	}
 
 	return nil
 }
