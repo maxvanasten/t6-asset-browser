@@ -14,17 +14,16 @@ import (
 
 // ExecuteQuery executes a query based on the query configuration and returns assets
 func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6assets.Asset, error) {
-	// Try to load from registry cache first
 	var registry *t6assets.Registry
-	var typeToFiles map[string][]string // Maps asset type to source files
+	var typeToFiles map[string][]string
 
-	if useCache {
+	// When map is specified, skip cache and process only matching files
+	// This is faster than loading 300k assets from cache then filtering
+	if useCache && query.Map == "" {
+		// Only use cache for queries without map filter
 		regCache, err := fastfile.NewRegistryCacheManager()
 		if err == nil {
-			// Find all .ff files
 			ffFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
-
-			// Try to load cached registry
 			startLoad := time.Now()
 			cachedReg, valid := regCache.LoadRegistry(zonePath, ffFiles)
 			if valid {
@@ -35,7 +34,7 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 		}
 	}
 
-	// If no valid cache, create new registry and index ONLY the files we need
+	// If no cache or map filter specified, process only needed files
 	if registry == nil {
 		registry = t6assets.NewRegistry()
 
@@ -94,16 +93,16 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 
 	var results []*t6assets.Asset
 
-	// If we have the typeToFiles index from cache, use it to optimize filtering
-	// This allows us to skip checking assets from files that don't contain the requested type
-	if typeToFiles != nil && query.Type != "" {
-		// Build a set of files that contain the requested type
+	// Simplified filtering:
+	// Case 1: Registry loaded from cache (no map filter) - use typeToFiles index if available
+	// Case 2: Files processed directly (map filter applied) - just filter by type/pattern
+	if typeToFiles != nil && query.Type != "" && query.Map == "" {
+		// Use type-to-files index from cache for efficient filtering
 		targetFiles := make(map[string]bool)
 		for _, t := range strings.Split(query.Type, ",") {
 			t = strings.TrimSpace(t)
 			if files, ok := typeToFiles[t]; ok {
 				for _, f := range files {
-					// Add with .ff extension if not present
 					if !strings.HasSuffix(f, ".ff") {
 						f = f + ".ff"
 					}
@@ -111,214 +110,35 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 				}
 			}
 		}
-
-		// If map filter also specified, intersect with target files
-		if query.Map != "" {
-			// Build set of files matching map pattern
-			mapFiles := make(map[string]bool)
-			mapList := strings.Split(query.Map, ",")
-			for _, m := range mapList {
-				m = strings.TrimSpace(m)
-				if m != "" {
-					// Remove .ff extension if present for matching
-					searchTerm := m
-					if strings.HasSuffix(searchTerm, ".ff") {
-						searchTerm = searchTerm[:len(searchTerm)-3]
-					}
-
-					// Find all files matching this map pattern
-					for _, asset := range registry.Assets {
-						source := asset.Source
-						if strings.Contains(source, searchTerm) {
-							mapFiles[source] = true
-						}
-					}
-				}
-			}
-
-			// Intersect: file must be in both targetFiles (by type) AND mapFiles (by map)
-			results = filterAssetsByFilesAndType(registry, query, targetFiles, mapFiles)
+		if len(targetFiles) > 0 {
+			results = filterAssetsSimple(registry, query, targetFiles)
 		} else {
-			// Only type filter, use file-based filtering
-			if len(targetFiles) > 0 {
-				results = filterAssetsByFiles(registry, query, targetFiles)
-			} else {
-				// No files contain this type, return empty results
-				results = []*t6assets.Asset{}
-			}
+			results = []*t6assets.Asset{}
 		}
-	} else if query.Map != "" && query.Type == "" {
-		// Map filter only, no type info available - use pattern matching
-		results = filterAssetsByMapPattern(registry, query)
 	} else {
-		// Standard query without optimizations
-		switch query.Cmd {
-		case "list":
-			results = listAssets(registry, query)
-		case "search":
-			results = searchAssets(registry, query)
-		default:
-			return nil, fmt.Errorf("unsupported command: %s", query.Cmd)
-		}
+		// Processed files directly OR no type filter - just apply filters
+		// Files are already filtered by map if specified
+		results = filterAssetsSimple(registry, query, nil)
 	}
 
 	return results, nil
 }
 
-// filterAssetsByFiles filters assets only from specific files, then applies query filters
-func filterAssetsByFiles(registry *t6assets.Registry, query QueryConfig, targetFiles map[string]bool) []*t6assets.Asset {
+// filterAssetsSimple filters assets by type and pattern
+// If targetFiles is provided, only checks assets from those files
+func filterAssetsSimple(registry *t6assets.Registry, query QueryConfig, targetFiles map[string]bool) []*t6assets.Asset {
 	var results []*t6assets.Asset
 
-	// First, collect only assets from target files
 	for _, asset := range registry.Assets {
-		source := asset.Source
-		// Ensure source has .ff extension for comparison
-		if !strings.HasSuffix(source, ".ff") {
-			source = source + ".ff"
-		}
-
-		if targetFiles[source] {
-			results = append(results, asset)
-		}
-	}
-
-	// Now apply remaining query filters (pattern, map, etc.)
-	// Filter by map
-	if query.Map != "" {
-		var filtered []*t6assets.Asset
-		mapList := strings.Split(query.Map, ",")
-		validMaps := make(map[string]bool)
-		for _, m := range mapList {
-			m = strings.TrimSpace(m)
-			if m != "" {
-				if !strings.HasSuffix(m, ".ff") {
-					m = m + ".ff"
-				}
-				validMaps[m] = true
-			}
-		}
-
-		for _, a := range results {
-			source := a.Source
+		// If targetFiles specified, skip assets from other files
+		if targetFiles != nil {
+			source := asset.Source
 			if !strings.HasSuffix(source, ".ff") {
 				source = source + ".ff"
 			}
-			if validMaps[source] {
-				filtered = append(filtered, a)
-			}
-		}
-		results = filtered
-	}
-
-	// Filter by type (should already be mostly filtered, but handle multiple types)
-	if query.Type != "" {
-		var filtered []*t6assets.Asset
-		typeList := strings.Split(query.Type, ",")
-		validTypes := make(map[t6assets.AssetType]bool)
-		for _, t := range typeList {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				validTypes[parseAssetType(t)] = true
-			}
-		}
-
-		for _, a := range results {
-			if validTypes[a.Type] {
-				filtered = append(filtered, a)
-			}
-		}
-		results = filtered
-	}
-
-	// Filter by pattern
-	if query.Pattern != "" {
-		include, exclude := parsePatterns(query.Pattern)
-		var filtered []*t6assets.Asset
-		for _, a := range results {
-			if matchesPatterns(a.Name, include, exclude, query.UseWildcard, query.IgnoreCase) {
-				filtered = append(filtered, a)
-			}
-		}
-		results = filtered
-	}
-
-	return results
-}
-
-// filterAssetsByFilesAndType filters assets that match both target files AND map files
-func filterAssetsByFilesAndType(registry *t6assets.Registry, query QueryConfig, targetFiles map[string]bool, mapFiles map[string]bool) []*t6assets.Asset {
-	var results []*t6assets.Asset
-
-	// Only process assets from files that are in BOTH targetFiles AND mapFiles
-	for _, asset := range registry.Assets {
-		source := asset.Source
-		if !strings.HasSuffix(source, ".ff") {
-			source = source + ".ff"
-		}
-
-		// Must be in both sets
-		if !targetFiles[source] || !mapFiles[source] {
-			continue
-		}
-
-		// Apply type filter
-		if query.Type != "" {
-			typeList := strings.Split(query.Type, ",")
-			validTypes := make(map[t6assets.AssetType]bool)
-			for _, t := range typeList {
-				t = strings.TrimSpace(t)
-				if t != "" {
-					validTypes[parseAssetType(t)] = true
-				}
-			}
-			if !validTypes[asset.Type] {
+			if !targetFiles[source] {
 				continue
 			}
-		}
-
-		// Apply pattern filter
-		if query.Pattern != "" {
-			include, exclude := parsePatterns(query.Pattern)
-			if !matchesPatterns(asset.Name, include, exclude, query.UseWildcard, query.IgnoreCase) {
-				continue
-			}
-		}
-
-		results = append(results, asset)
-	}
-
-	return results
-}
-
-// filterAssetsByMapPattern filters assets by map pattern (no type index available)
-func filterAssetsByMapPattern(registry *t6assets.Registry, query QueryConfig) []*t6assets.Asset {
-	var results []*t6assets.Asset
-
-	// Build set of files matching map pattern
-	mapFiles := make(map[string]bool)
-	mapList := strings.Split(query.Map, ",")
-	for _, m := range mapList {
-		m = strings.TrimSpace(m)
-		if m != "" {
-			// Remove .ff extension if present for matching
-			searchTerm := m
-			if strings.HasSuffix(searchTerm, ".ff") {
-				searchTerm = searchTerm[:len(searchTerm)-3]
-			}
-
-			// Find all files matching this map pattern
-			for _, asset := range registry.Assets {
-				if strings.Contains(asset.Source, searchTerm) {
-					mapFiles[asset.Source] = true
-				}
-			}
-		}
-	}
-
-	// Filter assets from matching files
-	for _, asset := range registry.Assets {
-		if !mapFiles[asset.Source] {
-			continue
 		}
 
 		// Apply type filter
