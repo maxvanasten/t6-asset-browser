@@ -43,19 +43,29 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 		var filesToProcess []string
 
 		if query.Map != "" {
-			// Only process the specific map files requested
+			// Get all available .ff files first
+			allFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
+
+			// Process all files that contain any of the specified map names
 			mapList := strings.Split(query.Map, ",")
-			for _, m := range mapList {
-				m = strings.TrimSpace(m)
-				if m != "" {
-					// Ensure .ff extension
-					if !strings.HasSuffix(m, ".ff") {
-						m = m + ".ff"
-					}
-					filePath := filepath.Join(zonePath, m)
-					// Verify file exists
-					if _, err := os.Stat(filePath); err == nil {
-						filesToProcess = append(filesToProcess, filePath)
+			for _, ffPath := range allFiles {
+				_, fileName := filepath.Split(ffPath)
+
+				// Check if this file matches any of the requested map patterns
+				for _, m := range mapList {
+					m = strings.TrimSpace(m)
+					if m != "" {
+						// Remove .ff extension if present for matching
+						searchTerm := m
+						if strings.HasSuffix(searchTerm, ".ff") {
+							searchTerm = searchTerm[:len(searchTerm)-3]
+						}
+
+						// Check if filename contains the map name
+						if strings.Contains(fileName, searchTerm) {
+							filesToProcess = append(filesToProcess, ffPath)
+							break // Don't add same file multiple times
+						}
 					}
 				}
 			}
