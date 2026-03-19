@@ -37,8 +37,7 @@ const (
 type QueryField int
 
 const (
-	CmdField QueryField = iota
-	MapField
+	MapField QueryField = iota
 	TypeField
 	PatternField
 	FormatField
@@ -47,7 +46,6 @@ const (
 
 // QueryConfig holds the query parameters
 type QueryConfig struct {
-	Cmd         string
 	Map         string
 	Type        string
 	Pattern     string
@@ -84,7 +82,7 @@ type Model struct {
 
 // NewModel creates a new TUI model
 func NewModel(zonePath string, useCache bool) Model {
-	fields := []QueryField{CmdField, MapField, TypeField, PatternField, FormatField, OutputField}
+	fields := []QueryField{MapField, TypeField, PatternField, FormatField, OutputField}
 	fieldInputs := make(map[QueryField]*textinput.Model)
 
 	for _, field := range fields {
@@ -93,9 +91,6 @@ func NewModel(zonePath string, useCache bool) Model {
 		ti.Width = 40
 
 		switch field {
-		case CmdField:
-			ti.Placeholder = "index, list, search, export"
-			ti.SetValue("list")
 		case MapField:
 			ti.Placeholder = "zm_tomb, zm_prison (comma-separated)"
 		case TypeField:
@@ -125,7 +120,7 @@ func NewModel(zonePath string, useCache bool) Model {
 		ZonePath:        zonePath,
 		UseCache:        useCache,
 		Query:           QueryConfig{},
-		ActiveField:     CmdField,
+		ActiveField:     MapField,
 		Fields:          fields,
 		FieldInputs:     fieldInputs,
 		Results:         []*t6assets.Asset{},
@@ -141,7 +136,7 @@ func NewModel(zonePath string, useCache bool) Model {
 
 // Init implements tea.Model
 func (m Model) Init() tea.Cmd {
-	m.FieldInputs[CmdField].Focus()
+	m.FieldInputs[MapField].Focus()
 	return nil
 }
 
@@ -263,7 +258,6 @@ func (m Model) updateQueryBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		for _, field := range m.Fields {
 			m.FieldInputs[field].SetValue("")
 		}
-		m.FieldInputs[CmdField].SetValue("list")
 		m.FieldInputs[FormatField].SetValue("plain")
 		return m, nil
 	}
@@ -430,7 +424,6 @@ func (m Model) viewQueryBuilder() string {
 	b.WriteString("\n\n")
 
 	fieldLabels := map[QueryField]string{
-		CmdField:     "Command",
 		MapField:     "Map",
 		TypeField:    "Type",
 		PatternField: "Pattern",
@@ -468,7 +461,7 @@ func (m Model) viewQueryBuilder() string {
 
 	if m.IsLoading {
 		loadingMsg := "⏳ Loading..."
-		if m.Query.Cmd == "export" {
+		if m.Query.Output != "" {
 			loadingMsg = "⏳ Exporting assets..."
 		}
 		b.WriteString(loadingStyle.Render(loadingMsg))
@@ -833,23 +826,17 @@ type ExportCompleteMsg struct {
 
 func (m Model) executeQuery() tea.Cmd {
 	return func() tea.Msg {
-		m.Query.Cmd = m.FieldInputs[CmdField].Value()
 		m.Query.Map = m.FieldInputs[MapField].Value()
 		m.Query.Type = m.FieldInputs[TypeField].Value()
 		m.Query.Pattern = m.FieldInputs[PatternField].Value()
 		m.Query.Format = m.FieldInputs[FormatField].Value()
 		m.Query.Output = m.FieldInputs[OutputField].Value()
 
-		switch m.Query.Cmd {
-		case "list", "search":
-			return m.runQuery()
-		case "export":
+		// If output file is specified, run export; otherwise run query (list/search)
+		if m.Query.Output != "" {
 			return m.runExport()
-		default:
-			return LoadCompleteMsg{
-				Error: fmt.Errorf("command '%s' not supported in TUI (use list, search, or export)", m.Query.Cmd),
-			}
 		}
+		return m.runQuery()
 	}
 }
 
@@ -922,15 +909,8 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool, silent bool
 		return nil, fmt.Errorf("failed to index FastFiles: %w", err)
 	}
 
-	var results []*t6assets.Asset
-	switch query.Cmd {
-	case "list":
-		results = filterAssets(registry, query)
-	case "search":
-		results = filterAssets(registry, query)
-	default:
-		return nil, fmt.Errorf("unsupported command: %s", query.Cmd)
-	}
+	// Filter assets based on query parameters (always apply filters)
+	results := filterAssets(registry, query)
 
 	return results, nil
 }

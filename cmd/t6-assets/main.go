@@ -15,17 +15,16 @@ import (
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
 )
 
-const version = "0.6.0"
+const version = "0.7.0"
 
 func main() {
 	startTime := time.Now()
 
 	var (
 		zoneDir     = flag.String("zone-dir", "", "Path to zone directory (default: auto-detect)")
-		command     = flag.String("cmd", "index", "Command: index, list, search, export")
 		assetMap    = flag.String("map", "", "Map name(s) (e.g., zm_tomb or zm_tomb,zm_prison)")
 		assetType   = flag.String("type", "", "Asset type(s): weapon, xmodel, perk, material, image (comma-separated for multiple)")
-		format      = flag.String("format", "plain", "Export format: plain, json, csv, gsc")
+		format      = flag.String("format", "plain", "Output format: plain, json, csv, gsc")
 		output      = flag.String("output", "", "Output file (default: stdout)")
 		useCache    = flag.Bool("cache", true, "Use caching for decrypted files")
 		clearCache  = flag.Bool("clear-cache", false, "Clear cache before running")
@@ -34,7 +33,7 @@ func main() {
 		showTUI     = flag.Bool("tui", false, "Launch interactive TUI")
 		sortBy      = flag.String("sort", "name", "Sort output by: name, type, source")
 		useWildcard = flag.Bool("wildcard", false, "Use wildcard pattern matching (* and ?)")
-		pattern     = flag.String("pattern", "", "Search pattern (required for search command)")
+		pattern     = flag.String("pattern", "", "Search pattern to filter assets")
 	)
 	flag.Parse()
 
@@ -49,7 +48,8 @@ func main() {
 			cache.Clear()
 			fmt.Fprintln(os.Stderr, "Cache cleared")
 		}
-		if *command == "" {
+		// If only clearing cache, exit now
+		if *assetMap == "" && *assetType == "" && *pattern == "" && *output == "" {
 			return
 		}
 	}
@@ -79,62 +79,25 @@ func main() {
 		return
 	}
 
-	// Create registry
+	// Create registry and index files
 	registry := t6assets.NewRegistry()
-
-	// Execute command
-	switch *command {
-	case "index":
-		err := indexFastFiles(zonePath, registry, *useCache, *assetMap)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error indexing: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("Indexed %d assets (took %v)\n", len(registry.Assets), time.Since(startTime))
-
-	case "list":
-		err := indexFastFiles(zonePath, registry, *useCache, *assetMap)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		listAssets(registry, *assetMap, *assetType, *pattern, *sortBy, *ignoreCase, *useWildcard)
-		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
-
-	case "search":
-		if *pattern == "" {
-			fmt.Fprintf(os.Stderr, "Error: search requires -pattern flag\n")
-			os.Exit(1)
-		}
-		err := indexFastFiles(zonePath, registry, *useCache, *assetMap)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		searchAssets(registry, *pattern, *assetType, *assetMap, *ignoreCase, *sortBy, *useWildcard)
-		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
-
-	case "export":
-		err := indexFastFiles(zonePath, registry, *useCache, *assetMap)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		err = exportAssets(registry, *assetMap, *assetType, *pattern, *format, *output, *sortBy, *ignoreCase, *useWildcard)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error exporting: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
-
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", *command)
-		fmt.Fprintf(os.Stderr, "\nAvailable commands:\n")
-		fmt.Fprintf(os.Stderr, "  index  - Index all FastFiles\n")
-		fmt.Fprintf(os.Stderr, "  list   - List assets (use -map and -type flags)\n")
-		fmt.Fprintf(os.Stderr, "  search - Search for assets by pattern\n")
-		fmt.Fprintf(os.Stderr, "  export - Export assets to file\n")
+	err := indexFastFiles(zonePath, registry, *useCache, *assetMap)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error indexing: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Export with the specified format (if -output is set, writes to file; otherwise writes to stdout)
+	err = exportAssets(registry, *assetMap, *assetType, *pattern, *format, *output, *sortBy, *ignoreCase, *useWildcard)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *output != "" {
+		fmt.Fprintf(os.Stderr, "\nExported to %s (took %v)\n", *output, time.Since(startTime))
+	} else {
+		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
 	}
 }
 
@@ -316,146 +279,6 @@ func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool,
 	}
 
 	return nil
-}
-
-func listAssets(registry *t6assets.Registry, sourceMap, assetType, pattern string, sortBy string, ignoreCase bool, useWildcard bool) {
-	var assets []*t6assets.Asset
-
-	if sourceMap != "" {
-		// Support comma-separated list of maps
-		mapList := strings.Split(sourceMap, ",")
-		validMaps := make(map[string]bool)
-		for _, m := range mapList {
-			m = strings.TrimSpace(m)
-			if m != "" {
-				// Support both with and without .ff extension
-				if !strings.HasSuffix(m, ".ff") {
-					m = m + ".ff"
-				}
-				validMaps[m] = true
-			}
-		}
-
-		// Get assets from all specified maps
-		seen := make(map[string]bool)
-		for _, a := range registry.Assets {
-			if validMaps[a.Source] {
-				// Deduplicate by name+type
-				key := a.Name + "|" + a.Type.String()
-				if !seen[key] {
-					assets = append(assets, a)
-					seen[key] = true
-				}
-			}
-		}
-	} else {
-		// Get all
-		for _, a := range registry.Assets {
-			assets = append(assets, a)
-		}
-	}
-
-	// Filter by type if specified (supports comma-separated list)
-	if assetType != "" {
-		var filtered []*t6assets.Asset
-		// Parse comma-separated types
-		typeList := strings.Split(assetType, ",")
-		validTypes := make(map[t6assets.AssetType]bool)
-		for _, t := range typeList {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				validTypes[parseAssetType(t)] = true
-			}
-		}
-
-		for _, a := range assets {
-			if validTypes[a.Type] {
-				filtered = append(filtered, a)
-			}
-		}
-		assets = filtered
-	}
-
-	// Filter by pattern if specified
-	if pattern != "" {
-		include, exclude := parsePatterns(pattern)
-		var filtered []*t6assets.Asset
-		for _, a := range assets {
-			if matchesPatterns(a.Name, include, exclude, useWildcard, ignoreCase) {
-				filtered = append(filtered, a)
-			}
-		}
-		assets = filtered
-	}
-
-	// Sort assets
-	sortAssets(assets, sortBy)
-
-	// Print
-	for _, a := range assets {
-		fmt.Printf("[%s] %s (from %s)\n", a.Type, a.Name, a.Source)
-	}
-
-	fmt.Printf("\nTotal: %d assets\n", len(assets))
-}
-
-func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap string, ignoreCase bool, sortBy string, useWildcard bool) {
-	var results []*t6assets.Asset
-
-	// Parse patterns once for efficiency
-	include, exclude := parsePatterns(pattern)
-
-	for _, a := range registry.Assets {
-		// Check pattern match using the new helper
-		if !matchesPatterns(a.Name, include, exclude, useWildcard, ignoreCase) {
-			continue
-		}
-
-		// Filter by type (supports comma-separated list)
-		if assetType != "" {
-			typeList := strings.Split(assetType, ",")
-			validTypes := make(map[t6assets.AssetType]bool)
-			for _, t := range typeList {
-				t = strings.TrimSpace(t)
-				if t != "" {
-					validTypes[parseAssetType(t)] = true
-				}
-			}
-			if !validTypes[a.Type] {
-				continue
-			}
-		}
-
-		// Filter by map (supports comma-separated list)
-		if sourceMap != "" {
-			mapList := strings.Split(sourceMap, ",")
-			validMaps := make(map[string]bool)
-			for _, m := range mapList {
-				m = strings.TrimSpace(m)
-				if m != "" {
-					// Support both with and without .ff extension
-					if !strings.HasSuffix(m, ".ff") {
-						m = m + ".ff"
-					}
-					validMaps[m] = true
-				}
-			}
-			if !validMaps[a.Source] {
-				continue
-			}
-		}
-
-		results = append(results, a)
-	}
-
-	// Sort results
-	sortAssets(results, sortBy)
-
-	for _, a := range results {
-		fmt.Printf("[%s] %s (from %s)\n", a.Type, a.Name, a.Source)
-	}
-
-	fmt.Printf("\nFound: %d matches\n", len(results))
 }
 
 func exportAssets(registry *t6assets.Registry, sourceMap, assetType, pattern string, format, output, sortBy string, ignoreCase bool, useWildcard bool) error {
