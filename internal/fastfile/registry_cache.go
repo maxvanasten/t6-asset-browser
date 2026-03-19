@@ -23,11 +23,12 @@ type AssetCacheEntry struct {
 
 // RegistryCache stores the entire registry state
 type RegistryCache struct {
-	CreatedAt    time.Time         `json:"created_at"`
-	ZonePath     string            `json:"zone_path"`
-	Assets       []AssetCacheEntry `json:"assets"`
-	SourceFiles  []string          `json:"source_files"`
-	FileVersions map[string]int64  `json:"file_versions"` // Map of file path to mod time
+	CreatedAt    time.Time           `json:"created_at"`
+	ZonePath     string              `json:"zone_path"`
+	Assets       []AssetCacheEntry   `json:"assets"`
+	SourceFiles  []string            `json:"source_files"`
+	FileVersions map[string]int64    `json:"file_versions"` // Map of file path to mod time
+	TypeToFiles  map[string][]string `json:"type_to_files"` // Map of asset type to source files containing that type
 }
 
 // RegistryCacheManager manages persistent registry caching
@@ -54,8 +55,14 @@ func (rcm *RegistryCacheManager) GetCachePath(zonePath string) string {
 	return filepath.Join(rcm.cacheDir, "registry_"+sanitizePath(zonePath)+".json.gz")
 }
 
+// CachedRegistry holds a loaded registry along with type indexing info
+type CachedRegistry struct {
+	Registry    *t6assets.Registry
+	TypeToFiles map[string][]string // Maps asset type to list of source files
+}
+
 // LoadRegistry attempts to load a cached registry
-func (rcm *RegistryCacheManager) LoadRegistry(zonePath string, ffFiles []string) (*t6assets.Registry, bool) {
+func (rcm *RegistryCacheManager) LoadRegistry(zonePath string, ffFiles []string) (*CachedRegistry, bool) {
 	rcm.mu.RLock()
 	defer rcm.mu.RUnlock()
 
@@ -123,7 +130,10 @@ func (rcm *RegistryCacheManager) LoadRegistry(zonePath string, ffFiles []string)
 		registry.Add(asset)
 	}
 
-	return registry, true
+	return &CachedRegistry{
+		Registry:    registry,
+		TypeToFiles: cache.TypeToFiles,
+	}, true
 }
 
 // SaveRegistry saves the registry to cache
@@ -141,9 +151,11 @@ func (rcm *RegistryCacheManager) SaveRegistry(zonePath string, registry *t6asset
 		fileVersions[ffPath] = fileInfo.ModTime().Unix()
 	}
 
-	// Convert registry to cache entries
+	// Convert registry to cache entries and build type-to-files index
 	var entries []AssetCacheEntry
 	seen := make(map[string]bool)
+	typeToFiles := make(map[string]map[string]bool) // type -> set of files
+
 	for _, asset := range registry.Assets {
 		key := asset.Source + "/" + asset.Name
 		if seen[key] {
@@ -156,6 +168,21 @@ func (rcm *RegistryCacheManager) SaveRegistry(zonePath string, registry *t6asset
 			Type:   asset.Type.String(),
 			Source: asset.Source,
 		})
+
+		// Build type to files index
+		typeStr := asset.Type.String()
+		if typeToFiles[typeStr] == nil {
+			typeToFiles[typeStr] = make(map[string]bool)
+		}
+		typeToFiles[typeStr][asset.Source] = true
+	}
+
+	// Convert sets to slices
+	typeToFilesSlice := make(map[string][]string)
+	for assetType, filesSet := range typeToFiles {
+		for file := range filesSet {
+			typeToFilesSlice[assetType] = append(typeToFilesSlice[assetType], file)
+		}
 	}
 
 	cache := RegistryCache{
@@ -164,6 +191,7 @@ func (rcm *RegistryCacheManager) SaveRegistry(zonePath string, registry *t6asset
 		Assets:       entries,
 		SourceFiles:  ffFiles,
 		FileVersions: fileVersions,
+		TypeToFiles:  typeToFilesSlice,
 	}
 
 	// Write compressed cache

@@ -15,6 +15,7 @@ import (
 func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6assets.Asset, error) {
 	// Try to load from registry cache first
 	var registry *t6assets.Registry
+	var typeToFiles map[string][]string // Maps asset type to source files
 
 	if useCache {
 		regCache, err := fastfile.NewRegistryCacheManager()
@@ -23,10 +24,11 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 			ffFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
 
 			// Try to load cached registry
-			cachedRegistry, valid := regCache.LoadRegistry(zonePath, ffFiles)
+			cachedReg, valid := regCache.LoadRegistry(zonePath, ffFiles)
 			if valid {
-				fmt.Fprintf(os.Stderr, "Loaded %d assets from cache\n", len(cachedRegistry.Assets))
-				registry = cachedRegistry
+				registry = cachedReg.Registry
+				typeToFiles = cachedReg.TypeToFiles
+				fmt.Fprintf(os.Stderr, "Loaded %d assets from cache\n", len(registry.Assets))
 			}
 		}
 	}
@@ -53,17 +55,124 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 
 	var results []*t6assets.Asset
 
-	// Get base results based on query type
-	switch query.Cmd {
-	case "list":
-		results = listAssets(registry, query)
-	case "search":
-		results = searchAssets(registry, query)
-	default:
-		return nil, fmt.Errorf("unsupported command: %s", query.Cmd)
+	// If we have the typeToFiles index from cache, use it to optimize filtering
+	// This allows us to skip checking assets from files that don't contain the requested type
+	if typeToFiles != nil && query.Type != "" {
+		// Build a set of files that contain the requested type
+		targetFiles := make(map[string]bool)
+		for _, t := range strings.Split(query.Type, ",") {
+			t = strings.TrimSpace(t)
+			if files, ok := typeToFiles[t]; ok {
+				for _, f := range files {
+					// Add with .ff extension if not present
+					if !strings.HasSuffix(f, ".ff") {
+						f = f + ".ff"
+					}
+					targetFiles[f] = true
+				}
+			}
+		}
+
+		// If we found files with the requested type, optimize the query
+		if len(targetFiles) > 0 {
+			results = filterAssetsByFiles(registry, query, targetFiles)
+		} else {
+			// No files contain this type, return empty results
+			results = []*t6assets.Asset{}
+		}
+	} else {
+		// Standard query without type-based optimization
+		switch query.Cmd {
+		case "list":
+			results = listAssets(registry, query)
+		case "search":
+			results = searchAssets(registry, query)
+		default:
+			return nil, fmt.Errorf("unsupported command: %s", query.Cmd)
+		}
 	}
 
 	return results, nil
+}
+
+// filterAssetsByFiles filters assets only from specific files, then applies query filters
+func filterAssetsByFiles(registry *t6assets.Registry, query QueryConfig, targetFiles map[string]bool) []*t6assets.Asset {
+	var results []*t6assets.Asset
+
+	// First, collect only assets from target files
+	for _, asset := range registry.Assets {
+		source := asset.Source
+		// Ensure source has .ff extension for comparison
+		if !strings.HasSuffix(source, ".ff") {
+			source = source + ".ff"
+		}
+
+		if targetFiles[source] {
+			results = append(results, asset)
+		}
+	}
+
+	// Now apply remaining query filters (pattern, map, etc.)
+	// Filter by map
+	if query.Map != "" {
+		var filtered []*t6assets.Asset
+		mapList := strings.Split(query.Map, ",")
+		validMaps := make(map[string]bool)
+		for _, m := range mapList {
+			m = strings.TrimSpace(m)
+			if m != "" {
+				if !strings.HasSuffix(m, ".ff") {
+					m = m + ".ff"
+				}
+				validMaps[m] = true
+			}
+		}
+
+		for _, a := range results {
+			source := a.Source
+			if !strings.HasSuffix(source, ".ff") {
+				source = source + ".ff"
+			}
+			if validMaps[source] {
+				filtered = append(filtered, a)
+			}
+		}
+		results = filtered
+	}
+
+	// Filter by type (should already be mostly filtered, but handle multiple types)
+	if query.Type != "" {
+		var filtered []*t6assets.Asset
+		typeList := strings.Split(query.Type, ",")
+		validTypes := make(map[t6assets.AssetType]bool)
+		for _, t := range typeList {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				validTypes[parseAssetType(t)] = true
+			}
+		}
+
+		for _, a := range results {
+			if validTypes[a.Type] {
+				filtered = append(filtered, a)
+			}
+		}
+		results = filtered
+	}
+
+	// Filter by pattern
+	if query.Pattern != "" {
+		include, exclude := parsePatterns(query.Pattern)
+		var filtered []*t6assets.Asset
+		for _, a := range results {
+			if matchesPatterns(a.Name, include, exclude, query.UseWildcard, query.IgnoreCase) {
+				filtered = append(filtered, a)
+			}
+		}
+		results = filtered
+	}
+
+	return results
 }
 
 // indexFastFilesParallel indexes all FastFiles in the zone directory using parallel processing
