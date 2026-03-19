@@ -629,33 +629,23 @@ func (m Model) viewHelpScreen() string {
 		return "Terminal too small. Please resize."
 	}
 
-	// Define styles
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#7D56F4")).
 		MarginBottom(1)
 
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7D56F4")).
-		Padding(1).
-		Width(m.Width - 4)
-
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00ADD8")).
-		Bold(true)
+		Foreground(lipgloss.Color("#00ADD8"))
 
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#CCCCCC"))
 
 	sectionStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFD700")).
-		Bold(true).
-		MarginTop(1)
+		Bold(true)
 
 	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888")).
-		MarginTop(1)
+		Foreground(lipgloss.Color("#888888"))
 
 	var b strings.Builder
 
@@ -667,62 +657,81 @@ func (m Model) viewHelpScreen() string {
 	if m.Width >= 80 {
 		content.WriteString(sectionStyle.Render("Query Builder - Vim Modes:"))
 		content.WriteString("\n\n")
-		content.WriteString(keyStyle.Render("NORMAL Mode") + descStyle.Render(" (default):\n"))
-		content.WriteString("  " + keyStyle.Render("i, I") + descStyle.Render("                     Enter INSERT mode to edit field\n"))
-		content.WriteString("  " + keyStyle.Render("j, ↓, k, ↑") + descStyle.Render("              Navigate between fields\n"))
-		content.WriteString("  " + keyStyle.Render("Tab, Shift+Tab") + descStyle.Render("          Alternative navigation\n"))
-		content.WriteString("  " + keyStyle.Render("Enter") + descStyle.Render("                   Execute the query\n"))
-		content.WriteString("  " + keyStyle.Render("Ctrl+L") + descStyle.Render("                  Clear all fields\n"))
-		content.WriteString("  " + keyStyle.Render("? or h") + descStyle.Render("                  Show this help\n"))
-		content.WriteString("  " + keyStyle.Render("q or Ctrl+C") + descStyle.Render("             Quit\n"))
+		content.WriteString(keyStyle.Render("NORMAL Mode") + descStyle.Render(" (default):"))
 		content.WriteString("\n")
-		content.WriteString(keyStyle.Render("INSERT Mode") + descStyle.Render(" (when editing):\n"))
-		content.WriteString("  " + descStyle.Render("Type characters         Enter text into the field\n"))
-		content.WriteString("  " + keyStyle.Render("Esc") + descStyle.Render("                     Return to NORMAL mode\n"))
-		content.WriteString("  " + keyStyle.Render("Ctrl+C") + descStyle.Render("                  Quit\n"))
+		content.WriteString("  " + keyStyle.Render("i, I") + descStyle.Render("                Enter INSERT mode to edit field"))
 		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("j, ↓, k, ↑") + descStyle.Render("         Navigate between fields"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("Tab, Shift+Tab") + descStyle.Render("     Alternative navigation"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("Enter") + descStyle.Render("              Execute the query"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("Ctrl+L") + descStyle.Render("             Clear all fields"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("? or h") + descStyle.Render("             Show this help"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("q or Ctrl+C") + descStyle.Render("        Quit"))
+		content.WriteString("\n\n")
+		content.WriteString(keyStyle.Render("INSERT Mode") + descStyle.Render(" (when editing):"))
+		content.WriteString("\n")
+		content.WriteString("  " + descStyle.Render("Type characters    Enter text into the field"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("Esc") + descStyle.Render("                Return to NORMAL mode"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("Ctrl+C") + descStyle.Render("             Quit"))
+		content.WriteString("\n\n")
 		content.WriteString(sectionStyle.Render("Results Screen:"))
 		content.WriteString("\n")
-		content.WriteString("  " + keyStyle.Render("j/↓ or k/↑") + descStyle.Render("              Move cursor down/up\n"))
-		content.WriteString("  " + keyStyle.Render("g") + descStyle.Render("                       Go to first result\n"))
-		content.WriteString("  " + keyStyle.Render("G") + descStyle.Render("                       Go to last result\n"))
-		content.WriteString("  " + keyStyle.Render("Ctrl+D") + descStyle.Render("                  Half page down\n"))
-		content.WriteString("  " + keyStyle.Render("Ctrl+U") + descStyle.Render("                  Half page up\n"))
-		content.WriteString("  " + keyStyle.Render("/") + descStyle.Render("                       Search in results\n"))
-		content.WriteString("  " + keyStyle.Render("n/N") + descStyle.Render("                     Next/previous search result\n"))
-		content.WriteString("  " + keyStyle.Render("y") + descStyle.Render("                       Copy current item name\n"))
-		content.WriteString("  " + keyStyle.Render("b or Esc") + descStyle.Render("                Back to query builder\n"))
-		content.WriteString("  " + keyStyle.Render("? or h") + descStyle.Render("                  Show this help\n"))
-		content.WriteString("  " + keyStyle.Render("q or Ctrl+C") + descStyle.Render("             Quit\n"))
+		content.WriteString("  " + keyStyle.Render("j/↓ or k/↑") + descStyle.Render("         Move cursor down/up"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("g") + descStyle.Render("                  Go to first result"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("G") + descStyle.Render("                  Go to last result"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("Ctrl+D") + descStyle.Render("             Half page down"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("Ctrl+U") + descStyle.Render("             Half page up"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("/") + descStyle.Render("                  Search in results"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("n/N") + descStyle.Render("                Next/previous search"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("y") + descStyle.Render("                  Copy current item"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("b or Esc") + descStyle.Render("         Back to query builder"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("? or h") + descStyle.Render("             Show this help"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("q or Ctrl+C") + descStyle.Render("        Quit"))
 	} else if m.Width >= 50 {
 		content.WriteString(sectionStyle.Render("Query Builder:"))
 		content.WriteString("\n")
-		content.WriteString("  " + keyStyle.Render("i") + descStyle.Render("=insert  ") + keyStyle.Render("j/k") + descStyle.Render("=nav  ") + keyStyle.Render("Enter") + descStyle.Render("=exec  ") + keyStyle.Render("?") + descStyle.Render("=help  ") + keyStyle.Render("q") + descStyle.Render("=quit\n"))
-		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("i") + descStyle.Render("=insert  ") + keyStyle.Render("j/k") + descStyle.Render("=nav  ") + keyStyle.Render("Enter") + descStyle.Render("=exec  ") + keyStyle.Render("?") + descStyle.Render("=help  ") + keyStyle.Render("q") + descStyle.Render("=quit"))
+		content.WriteString("\n\n")
 		content.WriteString(sectionStyle.Render("INSERT Mode:"))
 		content.WriteString("\n")
-		content.WriteString("  " + descStyle.Render("Type=edit  ") + keyStyle.Render("Esc") + descStyle.Render("=normal  ") + keyStyle.Render("Ctrl+C") + descStyle.Render("=quit\n"))
-		content.WriteString("\n")
+		content.WriteString("  " + descStyle.Render("Type=edit  ") + keyStyle.Render("Esc") + descStyle.Render("=normal  ") + keyStyle.Render("Ctrl+C") + descStyle.Render("=quit"))
+		content.WriteString("\n\n")
 		content.WriteString(sectionStyle.Render("Results Screen:"))
 		content.WriteString("\n")
-		content.WriteString("  " + keyStyle.Render("j/k") + descStyle.Render("=nav  ") + keyStyle.Render("g/G") + descStyle.Render("=top/bot  ") + keyStyle.Render("/") + descStyle.Render("=search  ") + keyStyle.Render("n/N") + descStyle.Render("=next/prev  ") + keyStyle.Render("y") + descStyle.Render("=copy\n"))
-		content.WriteString("  " + keyStyle.Render("b/Esc") + descStyle.Render("=back  ") + keyStyle.Render("?") + descStyle.Render("=help  ") + keyStyle.Render("q") + descStyle.Render("=quit\n"))
+		content.WriteString("  " + keyStyle.Render("j/k") + descStyle.Render("=nav  ") + keyStyle.Render("g/G") + descStyle.Render("=top/bot  ") + keyStyle.Render("/") + descStyle.Render("=search  ") + keyStyle.Render("n/N") + descStyle.Render("=next/prev  ") + keyStyle.Render("y") + descStyle.Render("=copy"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("b/Esc") + descStyle.Render("=back  ") + keyStyle.Render("?") + descStyle.Render("=help  ") + keyStyle.Render("q") + descStyle.Render("=quit"))
 	} else {
 		content.WriteString(sectionStyle.Render("Keys:"))
 		content.WriteString("\n")
-		content.WriteString("  " + keyStyle.Render("i") + descStyle.Render("=edit  ") + keyStyle.Render("j/k") + descStyle.Render("=move  ") + keyStyle.Render("Enter") + descStyle.Render("=go  ") + keyStyle.Render("?") + descStyle.Render("=help  ") + keyStyle.Render("q") + descStyle.Render("=quit\n"))
-		content.WriteString("  " + keyStyle.Render("Esc") + descStyle.Render("=normal  ") + keyStyle.Render("Ctrl+C") + descStyle.Render("=quit\n"))
+		content.WriteString("  " + keyStyle.Render("i") + descStyle.Render("=edit  ") + keyStyle.Render("j/k") + descStyle.Render("=move  ") + keyStyle.Render("Enter") + descStyle.Render("=go  ") + keyStyle.Render("?") + descStyle.Render("=help  ") + keyStyle.Render("q") + descStyle.Render("=quit"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("Esc") + descStyle.Render("=normal  ") + keyStyle.Render("Ctrl+C") + descStyle.Render("=quit"))
 	}
 
-	b.WriteString(borderStyle.Render(content.String()))
+	b.WriteString(content.String())
+	contentLines := strings.Count(content.String(), "\n")
 
-	// Calculate lines used and add padding
-	headerLines := 2 // Title + blank line
-	contentHeight := strings.Count(content.String(), "\n") + 1
-	footerLines := 2 // Blank line + footer
-	totalUsed := headerLines + contentHeight + footerLines
-
-	paddingLines := m.Height - totalUsed
+	// Add padding to fill screen
+	linesUsed := 3 + contentLines + 1 // Title(1) + blank(1) + content + blank(1) before footer
+	paddingLines := m.Height - linesUsed
 	if paddingLines > 0 {
 		for i := 0; i < paddingLines; i++ {
 			b.WriteString("\n")
