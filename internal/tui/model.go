@@ -140,13 +140,10 @@ func DefaultStyles() Styles {
 		FieldValue: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")),
 		FieldActive: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
-			Background(lipgloss.Color("#7D56F4")).
 			Bold(true).
-			MaxWidth(60),
+			Underline(true),
 		FieldInactive: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#CCCCCC")).
-			MaxWidth(60),
+			Foreground(lipgloss.Color("#CCCCCC")),
 		HelpText: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#888888")),
 		StatusBar: lipgloss.NewStyle().
@@ -166,10 +163,9 @@ func DefaultStyles() Styles {
 		ResultItem: lipgloss.NewStyle().
 			PaddingLeft(2),
 		ResultSelected: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
-			Background(lipgloss.Color("#7D56F4")).
-			PaddingLeft(2).
-			MaxWidth(200),
+			Bold(true).
+			Underline(true).
+			PaddingLeft(2),
 		SearchBox: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color("#444444")).
@@ -573,7 +569,6 @@ func (m Model) viewQueryBuilder() string {
 		}
 
 		b.WriteString(m.Styles.FieldLabel.Render(label + ":"))
-		b.WriteString(" ")
 
 		if field == m.ActiveField {
 			// Truncate input view if too long
@@ -581,17 +576,21 @@ func (m Model) viewQueryBuilder() string {
 			if len(inputView) > availableWidth {
 				inputView = inputView[:availableWidth-3] + "..."
 			}
-			b.WriteString(fieldStyle.Render(inputView))
+			// Render with active style (bold + underline)
+			b.WriteString(" ")
+			b.WriteString(fieldStyle.Render(input.View()))
 		} else {
 			displayValue := normalizeString(input.Value())
 			if displayValue == "" {
 				displayValue = normalizeString(input.Placeholder)
+				b.WriteString(" ")
 				b.WriteString(m.Styles.HelpText.Render(displayValue))
 			} else {
 				// Truncate display value if too long
 				if len(displayValue) > availableWidth {
 					displayValue = displayValue[:availableWidth-3] + "..."
 				}
+				b.WriteString(" ")
 				b.WriteString(fieldStyle.Render(displayValue))
 			}
 		}
