@@ -7,6 +7,7 @@ Browse, search, and export Call of Duty: Black Ops 2 (T6) assets from FastFiles.
 
 ## Features
 
+- **Interactive TUI** - Browse assets with a beautiful terminal UI (vim-like keybindings)
 - **Parse FastFiles** - Read zone/*.ff files directly (requires OpenAssetTools)
 - **Export Weapons** - Generate complete weapon lists for each map
 - **Export Perks** - Find all available perks on each map
@@ -73,15 +74,64 @@ Or download manually from [Releases](https://github.com/maxvanasten/t6-asset-bro
 ## Quick Start
 
 ```bash
+# Launch interactive TUI
+$ t6-assets -tui
+
 # Index all FastFiles
-t6-assets -cmd=index
+$ t6-assets -cmd=index
 
 # Export weapons from Origins as GSC
-t6-assets -cmd=export -map=zm_tomb -type=weapon -format=gsc
+$ t6-assets -cmd=export -map=zm_tomb -type=weapon -format=gsc
 
 # Search for raygun variants
-t6-assets -cmd=search -pattern=raygun
+$ t6-assets -cmd=search -pattern=raygun
 ```
+
+## Interactive TUI Mode
+
+The TUI provides an intuitive visual interface for browsing and searching assets.
+
+### Launching the TUI
+
+```bash
+t6-assets -tui
+```
+
+### TUI Controls
+
+**Query Builder:**
+- `Tab/↓/j` - Navigate to next field
+- `Shift+Tab/↑/k` - Navigate to previous field
+- `Enter` - Execute query
+- `Ctrl+L` - Clear all fields
+- `?` or `h` - Show help
+- `q` or `Ctrl+C` - Quit
+
+**Results Screen:**
+- `j/↓` or `k/↑` - Navigate results
+- `g` - Go to first result
+- `G` - Go to last result
+- `Ctrl+D` - Half page down
+- `Ctrl+U` - Half page up
+- `/` - Search within results
+- `n`/`N` - Next/previous search match
+- `y` - Copy current item name
+- `b` or `Esc` - Back to query builder
+- `?` or `h` - Show help
+- `q` or `Ctrl+C` - Quit
+
+### TUI Query Configuration
+
+Configure your query using the following fields:
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `Command` | Operation to perform | `list`, `search` |
+| `Map` | Comma-separated map names | `zm_tomb, zm_prison` |
+| `Type` | Asset type filter | `weapon`, `perk` |
+| `Pattern` | Search patterns (comma = AND, ! = exclude) | `upgraded, !staff` |
+| `Format` | Export format (export mode) | `gsc`, `json`, `csv` |
+| `Output` | Output file path | `weapons.txt` |
 
 ## Usage Examples
 
@@ -318,6 +368,7 @@ galil_upgraded_zm
 - `list` - List assets (optionally filter by map and type)
 - `search` - Search for assets by name pattern
 - `export` - Export assets to various formats
+- `tui` (flag `-tui`) - Launch interactive terminal UI
 
 ## Available Asset Types
 
@@ -333,6 +384,7 @@ galil_upgraded_zm
 
 | Flag | Description | Default |
 |------|-------------|---------|
+| `-tui` | Launch interactive terminal UI | false |
 | `-zone-dir` | Path to zone directory | Auto-detect |
 | `-cmd` | Command to run | index |
 | `-map` | Map name filter | (none) |

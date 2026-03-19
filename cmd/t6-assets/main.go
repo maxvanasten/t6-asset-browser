@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/maxvanasten/t6-asset-browser/internal/fastfile"
+	"github.com/maxvanasten/t6-asset-browser/internal/tui"
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
 )
 
@@ -29,6 +31,7 @@ func main() {
 		clearCache  = flag.Bool("clear-cache", false, "Clear cache before running")
 		ignoreCase  = flag.Bool("i", false, "Case-insensitive search")
 		showVersion = flag.Bool("version", false, "Show version and exit")
+		showTUI     = flag.Bool("tui", false, "Launch interactive TUI")
 		sortBy      = flag.String("sort", "name", "Sort output by: name, type, source")
 		useWildcard = flag.Bool("wildcard", false, "Use wildcard pattern matching (* and ?)")
 		pattern     = flag.String("pattern", "", "Search pattern (required for search command)")
@@ -63,6 +66,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  Steam: ~/.steam/steam/steamapps/common/Call of Duty Black Ops II/zone/all\n")
 		fmt.Fprintf(os.Stderr, "  Plutonium: %%LOCALAPPDATA%%/Plutonium/storage/t6/zone\n")
 		os.Exit(1)
+	}
+
+	// Launch TUI if requested
+	if *showTUI {
+		model := tui.NewModel(zonePath, *useCache)
+		p := tea.NewProgram(model, tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// Create registry
