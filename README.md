@@ -135,11 +135,11 @@ Configure your query using the following fields:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| `Command` | Operation to perform | `list`, `search` |
+| `Command` | Operation to perform | `list`, `search`, `export` |
 | `Map` | Comma-separated map names | `zm_tomb, zm_prison` |
 | `Type` | Asset type filter | `weapon`, `perk` |
 | `Pattern` | Search patterns (comma = AND, ! = exclude) | `upgraded, !staff` |
-| `Format` | Export format (export mode) | `gsc`, `json`, `csv` |
+| `Format` | Export format (export mode) | `gsc`, `json`, `csv`, `plain` |
 | `Output` | Output file path | `weapons.txt` |
 
 ## Usage Examples

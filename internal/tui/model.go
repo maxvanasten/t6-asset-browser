@@ -68,6 +68,10 @@ type Model struct {
 	IsLoading     bool
 	Error         error
 
+	// Terminal dimensions
+	Width  int
+	Height int
+
 	// Styles
 	Styles Styles
 }
@@ -99,6 +103,7 @@ type Styles struct {
 	ResultItem     lipgloss.Style
 	ResultSelected lipgloss.Style
 	SearchBox      lipgloss.Style
+	Container      lipgloss.Style
 }
 
 // DefaultStyles creates default lipgloss styles
@@ -146,6 +151,9 @@ func DefaultStyles() Styles {
 			Background(lipgloss.Color("#444444")).
 			PaddingLeft(1).
 			PaddingRight(1),
+		Container: lipgloss.NewStyle().
+			PaddingLeft(2).
+			PaddingRight(2),
 	}
 }
 
@@ -187,7 +195,7 @@ func NewModel(zonePath string, useCache bool) Model {
 	searchInput.Placeholder = "Search in results..."
 	searchInput.Width = 40
 
-	// Initialize viewport for results
+	// Initialize viewport for results - will be resized on first WindowSizeMsg
 	vp := viewport.New(80, 20)
 
 	return Model{
@@ -209,6 +217,8 @@ func NewModel(zonePath string, useCache bool) Model {
 		StatusMessage:   "Press 'i' to edit field, '?' for help",
 		IsLoading:       false,
 		Styles:          DefaultStyles(),
+		Width:           80,
+		Height:          24,
 	}
 }
 
@@ -235,8 +245,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
+		m.Width = msg.Width
+		m.Height = msg.Height
 		m.Viewport.Width = msg.Width - 4
-		m.Viewport.Height = msg.Height - 8
+		// Reserve space for header, status bar, and help text
+		m.Viewport.Height = msg.Height - 10
+		if m.Viewport.Height < 5 {
+			m.Viewport.Height = 5
+		}
 
 	case LoadCompleteMsg:
 		m.IsLoading = false
@@ -250,6 +266,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.StatusMessage = fmt.Sprintf("Found %d results", len(m.Results))
 			m.Screen = ResultsScreen
 			m.Mode = NormalMode
+		}
+
+	case ExportCompleteMsg:
+		m.IsLoading = false
+		if msg.Error != nil {
+			m.Error = msg.Error
+			m.StatusMessage = fmt.Sprintf("Export error: %v", msg.Error)
+		} else {
+			m.StatusMessage = fmt.Sprintf("Exported %d assets to %s", msg.Count, msg.Filename)
 		}
 	}
 
@@ -470,6 +495,20 @@ func (m Model) updateHelpScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // viewQueryBuilder renders the query builder screen
 func (m Model) viewQueryBuilder() string {
+	// Calculate available width for input fields
+	availableWidth := m.Width - 20 // Account for margins, label (12), padding, etc.
+	if availableWidth < 20 {
+		availableWidth = 20
+	}
+	if availableWidth > 60 {
+		availableWidth = 60
+	}
+
+	// Update input widths
+	for _, field := range m.Fields {
+		m.FieldInputs[field].Width = availableWidth
+	}
+
 	var b strings.Builder
 
 	// Show mode indicator in title
@@ -511,13 +550,22 @@ func (m Model) viewQueryBuilder() string {
 		b.WriteString(" ")
 
 		if field == m.ActiveField {
-			b.WriteString(fieldStyle.Render(input.View()))
+			// Truncate input view if too long
+			inputView := input.View()
+			if len(inputView) > availableWidth {
+				inputView = inputView[:availableWidth-3] + "..."
+			}
+			b.WriteString(fieldStyle.Render(inputView))
 		} else {
 			displayValue := input.Value()
 			if displayValue == "" {
 				displayValue = input.Placeholder
 				b.WriteString(m.Styles.HelpText.Render(displayValue))
 			} else {
+				// Truncate display value if too long
+				if len(displayValue) > availableWidth {
+					displayValue = displayValue[:availableWidth-3] + "..."
+				}
 				b.WriteString(fieldStyle.Render(displayValue))
 			}
 		}
@@ -528,20 +576,32 @@ func (m Model) viewQueryBuilder() string {
 
 	// Status/error messages
 	if m.Error != nil {
-		b.WriteString(m.Styles.ErrorText.Render(fmt.Sprintf("Error: %v", m.Error)))
+		errorMsg := fmt.Sprintf("Error: %v", m.Error)
+		if len(errorMsg) > m.Width-4 {
+			errorMsg = errorMsg[:m.Width-7] + "..."
+		}
+		b.WriteString(m.Styles.ErrorText.Render(errorMsg))
 		b.WriteString("\n")
 	} else {
-		b.WriteString(m.Styles.StatusBar.Render(m.StatusMessage))
+		statusMsg := m.StatusMessage
+		if len(statusMsg) > m.Width-4 {
+			statusMsg = statusMsg[:m.Width-7] + "..."
+		}
+		b.WriteString(m.Styles.StatusBar.Render(statusMsg))
 	}
 
 	b.WriteString("\n\n")
 	if m.Mode == NormalMode {
-		b.WriteString(m.Styles.HelpText.Render("i=insert • j/k=navigate • Enter=execute • ?=help • q=quit"))
+		helpText := "i=insert • j/k=navigate • Enter=execute • ?=help • q=quit"
+		if m.Width < 60 {
+			helpText = "i=insert • j/k=nav • Enter=run • ?=help • q=quit"
+		}
+		b.WriteString(m.Styles.HelpText.Render(helpText))
 	} else {
 		b.WriteString(m.Styles.HelpText.Render("INSERT mode • type to edit • Esc=normal mode"))
 	}
 
-	return b.String()
+	return m.Styles.Container.Render(b.String())
 }
 
 // viewResultsScreen renders the results screen
@@ -556,15 +616,30 @@ func (m Model) viewResultsScreen() string {
 		b.WriteString("\n")
 	}
 
+	// Calculate available height for results
+	availableHeight := m.Height - 8 // Reserve space for header, status, and help
+	if m.IsSearching {
+		availableHeight -= 2
+	}
+	if availableHeight < 5 {
+		availableHeight = 5
+	}
+
 	// Build results list
 	var content strings.Builder
 	start := m.Viewport.YOffset
-	end := start + m.Viewport.Height
+	end := start + availableHeight
 	if end > len(m.FilteredResults) {
 		end = len(m.FilteredResults)
 	}
 	if start < 0 {
 		start = 0
+	}
+
+	// Calculate max line width
+	maxLineWidth := m.Width - 6 // Account for margins and cursor indicator
+	if maxLineWidth < 40 {
+		maxLineWidth = 40
 	}
 
 	for i := start; i < end; i++ {
@@ -573,7 +648,13 @@ func (m Model) viewResultsScreen() string {
 		}
 
 		asset := m.FilteredResults[i]
-		line := fmt.Sprintf("[%s] %s (from %s)\n", asset.Type, asset.Name, asset.Source)
+		line := fmt.Sprintf("[%s] %s (from %s)", asset.Type, asset.Name, asset.Source)
+
+		// Truncate line if too long
+		if len(line) > maxLineWidth {
+			line = line[:maxLineWidth-3] + "..."
+		}
+		line += "\n"
 
 		if i == m.Cursor {
 			content.WriteString(m.Styles.ResultSelected.Render("> " + line))
@@ -583,6 +664,8 @@ func (m Model) viewResultsScreen() string {
 	}
 
 	// Update viewport content
+	m.Viewport.Width = m.Width - 4
+	m.Viewport.Height = availableHeight
 	m.Viewport.SetContent(content.String())
 	b.WriteString(m.Viewport.View())
 
@@ -592,12 +675,19 @@ func (m Model) viewResultsScreen() string {
 	if m.StatusMessage != "" && !m.IsSearching {
 		status = m.StatusMessage
 	}
+	if len(status) > m.Width-4 {
+		status = status[:m.Width-7] + "..."
+	}
 	b.WriteString(m.Styles.StatusBar.Render(status))
 
 	b.WriteString("\n")
-	b.WriteString(m.Styles.HelpText.Render("j/↓/k/↑ to navigate • g/G for top/bottom • / to search • y to copy • b/esc back • ? help • q quit"))
+	helpText := "j/↓/k/↑ to navigate • g/G for top/bottom • / to search • y to copy • b/esc back • ? help • q quit"
+	if m.Width < 80 {
+		helpText = "j/k=nav • g/G=top/bot • /=search • y=copy • b=back • ?=help • q=quit"
+	}
+	b.WriteString(m.Styles.HelpText.Render(helpText))
 
-	return b.String()
+	return m.Styles.Container.Render(b.String())
 }
 
 // viewHelpScreen renders the help screen
@@ -607,42 +697,54 @@ func (m Model) viewHelpScreen() string {
 	b.WriteString(m.Styles.Title.Render("Help"))
 	b.WriteString("\n\n")
 
-	helpText := `
-Query Builder - Vim Modes:
+	helpText := "Query Builder - Vim Modes:\n\n"
 
-NORMAL Mode (default):
-  i, I                      Enter INSERT mode to edit field
-  j, ↓, k, ↑               Navigate between fields
-  Tab, Shift+Tab           Alternative navigation
-  Enter                    Execute the query
-  Ctrl+L                   Clear all fields
-  ? or h                   Show this help
-  q or Ctrl+C              Quit
+	if m.Width >= 80 {
+		helpText += `NORMAL Mode (default):
+  i, I                     Enter INSERT mode to edit field
+  j, ↓, k, ↑              Navigate between fields
+  Tab, Shift+Tab          Alternative navigation
+  Enter                   Execute the query
+  Ctrl+L                  Clear all fields
+  ? or h                  Show this help
+  q or Ctrl+C             Quit
 
 INSERT Mode (when editing):
-  Type characters          Enter text into the field
-  Esc                      Return to NORMAL mode
-  Ctrl+C                   Quit
+  Type characters         Enter text into the field
+  Esc                     Return to NORMAL mode
+  Ctrl+C                  Quit
 
 Results Screen:
-  j/↓ or k/↑               Move cursor down/up
-  g                        Go to first result
-  G                        Go to last result
-  Ctrl+D                   Half page down
-  Ctrl+U                   Half page up
-  /                        Search in results
-  n/N                      Next/previous search result
-  y                        Copy current item name
-  b or Esc                 Back to query builder
-  ? or h                   Show this help
-  q or Ctrl+C              Quit
+  j/↓ or k/↑              Move cursor down/up
+  g                       Go to first result
+  G                       Go to last result
+  Ctrl+D                  Half page down
+  Ctrl+U                  Half page up
+  /                       Search in results
+  n/N                     Next/previous search result
+  y                       Copy current item name
+  b or Esc                Back to query builder
+  ? or h                  Show this help
+  q or Ctrl+C             Quit`
+	} else {
+		helpText += `NORMAL Mode:
+  i=insert • j/k=nav • Enter=exec • Ctrl+L=clear • ?=help • q=quit
+
+INSERT Mode:
+  Type=edit • Esc=normal • Ctrl+C=quit
+
+Results Screen:
+  j/k=nav • g/G=top/bot • /=search • n/N=next/prev • y=copy
+  b/Esc=back • ?=help • q=quit`
+	}
+
+	helpText += `
 
 Query Syntax:
-  -cmd:    index, list, search, export
-  -map:    Comma-separated map names (zm_tomb, zm_prison)
-  -type:   Comma-separated types (weapon, perk, xmodel)
-  -pattern: Comma-separated patterns with AND logic
-           Use ! prefix to exclude (e.g., upgraded,!staff)
+  -cmd: index, list, search, export
+  -map: Comma-separated map names (zm_tomb, zm_prison)
+  -type: weapon, perk, xmodel, material, image
+  -pattern: Comma-separated with AND logic (! to exclude)
   -format: plain, json, csv, gsc
   -output: File path or leave empty for stdout
 `
@@ -651,7 +753,7 @@ Query Syntax:
 	b.WriteString("\n")
 	b.WriteString(m.Styles.StatusBar.Render("Press q, esc, or ?/h to return"))
 
-	return b.String()
+	return m.Styles.Container.Render(b.String())
 }
 
 // updateViewport updates the viewport position based on cursor
@@ -724,6 +826,13 @@ type LoadCompleteMsg struct {
 	Error  error
 }
 
+// ExportCompleteMsg is sent when export completes
+type ExportCompleteMsg struct {
+	Filename string
+	Count    int
+	Error    error
+}
+
 // executeQuery executes the current query and returns a command
 func (m Model) executeQuery() tea.Cmd {
 	return func() tea.Msg {
@@ -735,15 +844,16 @@ func (m Model) executeQuery() tea.Cmd {
 		m.Query.Format = m.FieldInputs[FormatField].Value()
 		m.Query.Output = m.FieldInputs[OutputField].Value()
 
-		// For simplicity, we only support list and search commands in TUI
-		// Export would require file handling which is better suited for CLI
 		switch m.Query.Cmd {
 		case "list", "search":
 			// Execute the query
 			return m.runQuery()
+		case "export":
+			// Execute export
+			return m.runExport()
 		default:
 			return LoadCompleteMsg{
-				Error: fmt.Errorf("command '%s' not supported in TUI (use list or search)", m.Query.Cmd),
+				Error: fmt.Errorf("command '%s' not supported in TUI (use list, search, or export)", m.Query.Cmd),
 			}
 		}
 	}
@@ -755,5 +865,29 @@ func (m Model) runQuery() tea.Msg {
 	return LoadCompleteMsg{
 		Assets: results,
 		Error:  err,
+	}
+}
+
+// runExport runs the export and returns completion message
+func (m Model) runExport() tea.Msg {
+	results, err := ExecuteQuery(m.ZonePath, m.Query, m.UseCache)
+	if err != nil {
+		return ExportCompleteMsg{
+			Error: err,
+		}
+	}
+
+	// Determine output file
+	outputFile := m.Query.Output
+	if outputFile == "" {
+		outputFile = "export.txt"
+	}
+
+	// Export the results
+	count, err := ExportToFile(results, m.Query.Format, outputFile)
+	return ExportCompleteMsg{
+		Filename: outputFile,
+		Count:    count,
+		Error:    err,
 	}
 }

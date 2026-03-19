@@ -370,3 +370,46 @@ func wildcardMatch(str, pattern string) bool {
 
 	return false
 }
+
+// ExportToFile exports assets to a file in the specified format
+// Returns the number of assets exported and any error
+func ExportToFile(assets []*t6assets.Asset, format string, filename string) (int, error) {
+	file, err := os.Create(filename)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	switch format {
+	case "plain", "":
+		for _, a := range assets {
+			fmt.Fprintln(file, a.Name)
+		}
+	case "json":
+		fmt.Fprintln(file, "[")
+		for i, a := range assets {
+			comma := ","
+			if i == len(assets)-1 {
+				comma = ""
+			}
+			fmt.Fprintf(file, "  {\"name\": \"%s\", \"type\": \"%s\", \"source\": \"%s\"}%s\n",
+				a.Name, a.Type, a.Source, comma)
+		}
+		fmt.Fprintln(file, "]")
+	case "csv":
+		fmt.Fprintln(file, "name,type,source")
+		for _, a := range assets {
+			fmt.Fprintf(file, "%s,%s,%s\n", a.Name, a.Type, a.Source)
+		}
+	case "gsc":
+		fmt.Fprintln(file, "array(")
+		for _, a := range assets {
+			fmt.Fprintf(file, "\t\"%s\",\n", a.Name)
+		}
+		fmt.Fprintln(file, ")")
+	default:
+		return 0, fmt.Errorf("unknown format: %s", format)
+	}
+
+	return len(assets), nil
+}
