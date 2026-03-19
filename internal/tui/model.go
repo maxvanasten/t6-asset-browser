@@ -480,11 +480,17 @@ func (m Model) viewQueryBuilder() string {
 		b.WriteString(m.StatusMessage)
 	}
 
-	b.WriteString("\n")
-	if m.Mode == NormalMode && !m.IsLoading {
-		b.WriteString(helpStyle.Render("i=insert | j/k=navigate | Enter=execute | ?=help | q=quit"))
-	} else if m.Mode == InsertMode {
-		b.WriteString(helpStyle.Render("INSERT mode | type to edit | Esc=normal mode"))
+	// Calculate lines used and add padding to push bottom to terminal bottom
+	linesUsed := 4             // Title (1) + newline (1) + subtitle (1) + blank line (1)
+	linesUsed += len(m.Fields) // Each field
+	linesUsed += 2             // Blank line + status message
+	linesUsed += 1             // Help text
+
+	paddingLines := m.Height - linesUsed
+	if paddingLines > 0 {
+		for i := 0; i < paddingLines; i++ {
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String()
@@ -586,13 +592,32 @@ func (m Model) viewResultsScreen() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
+	// Calculate how many result lines we actually rendered
+	resultLinesRendered := end - start
+
+	// Build status string
 	status := fmt.Sprintf(" %d/%d results | Cursor: %d ", len(m.FilteredResults), len(m.Results), m.Cursor+1)
 	if m.StatusMessage != "" && !m.IsSearching {
 		status = " " + m.StatusMessage + " "
 	}
-	b.WriteString(statusStyle.Render(status))
 
+	// Calculate total lines used
+	linesUsed := 2 // Title (1) + newline (1)
+	if m.IsSearching {
+		linesUsed += 2 // Search box + newline
+	}
+	linesUsed += resultLinesRendered // Result lines
+	linesUsed += 3                   // Newlines + status + newline + help
+
+	// Add padding to push bottom to terminal bottom
+	paddingLines := m.Height - linesUsed
+	if paddingLines > 0 {
+		for i := 0; i < paddingLines; i++ {
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString(statusStyle.Render(status))
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("j/k=navigate | g/G=top/bottom | /=search | y=copy | b/esc=back | ?=help | q=quit"))
 
@@ -609,25 +634,25 @@ func (m Model) viewHelpScreen() string {
 		Bold(true).
 		Foreground(lipgloss.Color("#7D56F4")).
 		MarginBottom(1)
-	
+
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).
 		Padding(1).
 		Width(m.Width - 4)
-	
+
 	keyStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#00ADD8")).
 		Bold(true)
-	
+
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#CCCCCC"))
-	
+
 	sectionStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFD700")).
 		Bold(true).
 		MarginTop(1)
-	
+
 	footerStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#888888")).
 		MarginTop(1)
@@ -638,7 +663,7 @@ func (m Model) viewHelpScreen() string {
 	b.WriteString("\n\n")
 
 	var content strings.Builder
-	
+
 	if m.Width >= 80 {
 		content.WriteString(sectionStyle.Render("Query Builder - Vim Modes:"))
 		content.WriteString("\n\n")
@@ -690,12 +715,24 @@ func (m Model) viewHelpScreen() string {
 	}
 
 	b.WriteString(borderStyle.Render(content.String()))
-	b.WriteString("\n\n")
+
+	// Calculate lines used and add padding
+	headerLines := 2 // Title + blank line
+	contentHeight := strings.Count(content.String(), "\n") + 1
+	footerLines := 2 // Blank line + footer
+	totalUsed := headerLines + contentHeight + footerLines
+
+	paddingLines := m.Height - totalUsed
+	if paddingLines > 0 {
+		for i := 0; i < paddingLines; i++ {
+			b.WriteString("\n")
+		}
+	}
+
 	b.WriteString(footerStyle.Render("Press q, esc, or ?/h to return"))
 
 	return b.String()
 }
-
 
 func (m *Model) updateViewport() {
 	if m.Cursor < m.Viewport.YOffset {
