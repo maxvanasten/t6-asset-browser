@@ -481,10 +481,15 @@ func (m Model) viewQueryBuilder() string {
 	}
 
 	// Calculate lines used and add padding to push bottom to terminal bottom
-	linesUsed := 4             // Title (1) + newline (1) + subtitle (1) + blank line (1)
-	linesUsed += len(m.Fields) // Each field
-	linesUsed += 2             // Blank line + status message
-	linesUsed += 1             // Help text
+	// Title (1) + mode (0, same line) + newline (1) + subtitle (1) + margin (1) + blank (1) = 5
+	linesUsed := 5
+	linesUsed += len(m.Fields) // Each field (6)
+	linesUsed += 1             // Blank line before status
+	linesUsed += 1             // Status/loading message
+	if m.IsLoading || m.Error != nil {
+		linesUsed += 1 // Extra newline after loading/error message
+	}
+	// No extra line for normal status message (it doesn't have explicit \n)
 
 	paddingLines := m.Height - linesUsed
 	if paddingLines > 0 {
