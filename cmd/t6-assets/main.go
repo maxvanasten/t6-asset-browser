@@ -85,7 +85,7 @@ func main() {
 	// Execute command
 	switch *command {
 	case "index":
-		err := indexFastFiles(zonePath, registry, *useCache)
+		err := indexFastFiles(zonePath, registry, *useCache, *assetMap)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error indexing: %v\n", err)
 			os.Exit(1)
@@ -93,7 +93,7 @@ func main() {
 		fmt.Printf("Indexed %d assets (took %v)\n", len(registry.Assets), time.Since(startTime))
 
 	case "list":
-		err := indexFastFiles(zonePath, registry, *useCache)
+		err := indexFastFiles(zonePath, registry, *useCache, *assetMap)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -106,7 +106,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: search requires -pattern flag\n")
 			os.Exit(1)
 		}
-		err := indexFastFiles(zonePath, registry, *useCache)
+		err := indexFastFiles(zonePath, registry, *useCache, *assetMap)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -115,7 +115,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
 
 	case "export":
-		err := indexFastFiles(zonePath, registry, *useCache)
+		err := indexFastFiles(zonePath, registry, *useCache, *assetMap)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -160,7 +160,7 @@ func detectZoneDir() string {
 	return ""
 }
 
-func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool) error {
+func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool, mapFilter string) error {
 	// Find all .ff files
 	ffFiles, err := filepath.Glob(filepath.Join(zonePath, "*.ff"))
 	if err != nil {
@@ -171,7 +171,37 @@ func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool)
 		return fmt.Errorf("no FastFiles found in %s", zonePath)
 	}
 
-	totalFiles := len(ffFiles)
+	// Filter files by map if specified
+	var filesToProcess []string
+	if mapFilter != "" {
+		mapList := strings.Split(mapFilter, ",")
+		for _, ffPath := range ffFiles {
+			_, fileName := filepath.Split(ffPath)
+			for _, m := range mapList {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					searchTerm := m
+					if strings.HasSuffix(searchTerm, ".ff") {
+						searchTerm = searchTerm[:len(searchTerm)-3]
+					}
+					if strings.Contains(fileName, searchTerm) {
+						filesToProcess = append(filesToProcess, ffPath)
+						break
+					}
+				}
+			}
+		}
+		if len(filesToProcess) > 0 {
+			fmt.Fprintf(os.Stderr, "Processing %d files matching '%s'\n", len(filesToProcess), mapFilter)
+		}
+	}
+
+	// If no map filter or no matches, process all files
+	if len(filesToProcess) == 0 {
+		filesToProcess = ffFiles
+	}
+
+	totalFiles := len(filesToProcess)
 
 	// Initialize cache if requested
 	var cache *fastfile.Cache
@@ -191,7 +221,7 @@ func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool)
 	parser := fastfile.NewParser(registry)
 	processed := 0
 
-	for i, ffPath := range ffFiles {
+	for i, ffPath := range filesToProcess {
 		_, fileName := filepath.Split(ffPath)
 
 		var zoneData []byte
