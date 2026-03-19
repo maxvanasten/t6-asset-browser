@@ -3,7 +3,7 @@
 This document contains step-by-step instructions for releasing a new version of t6-asset-browser.
 
 **Last Updated:** 2026-03-18  
-**Current Version:** v0.1.0 (initial release)
+**Current Version:** v0.6.0
 
 ## Prerequisites
 

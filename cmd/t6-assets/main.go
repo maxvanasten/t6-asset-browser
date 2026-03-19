@@ -13,7 +13,7 @@ import (
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
 )
 
-const version = "0.5.0"
+const version = "0.6.0"
 
 func main() {
 	startTime := time.Now()
