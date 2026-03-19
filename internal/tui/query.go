@@ -112,15 +112,46 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 			}
 		}
 
-		// If we found files with the requested type, optimize the query
-		if len(targetFiles) > 0 {
-			results = filterAssetsByFiles(registry, query, targetFiles)
+		// If map filter also specified, intersect with target files
+		if query.Map != "" {
+			// Build set of files matching map pattern
+			mapFiles := make(map[string]bool)
+			mapList := strings.Split(query.Map, ",")
+			for _, m := range mapList {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					// Remove .ff extension if present for matching
+					searchTerm := m
+					if strings.HasSuffix(searchTerm, ".ff") {
+						searchTerm = searchTerm[:len(searchTerm)-3]
+					}
+
+					// Find all files matching this map pattern
+					for _, asset := range registry.Assets {
+						source := asset.Source
+						if strings.Contains(source, searchTerm) {
+							mapFiles[source] = true
+						}
+					}
+				}
+			}
+
+			// Intersect: file must be in both targetFiles (by type) AND mapFiles (by map)
+			results = filterAssetsByFilesAndType(registry, query, targetFiles, mapFiles)
 		} else {
-			// No files contain this type, return empty results
-			results = []*t6assets.Asset{}
+			// Only type filter, use file-based filtering
+			if len(targetFiles) > 0 {
+				results = filterAssetsByFiles(registry, query, targetFiles)
+			} else {
+				// No files contain this type, return empty results
+				results = []*t6assets.Asset{}
+			}
 		}
+	} else if query.Map != "" && query.Type == "" {
+		// Map filter only, no type info available - use pattern matching
+		results = filterAssetsByMapPattern(registry, query)
 	} else {
-		// Standard query without type-based optimization
+		// Standard query without optimizations
 		switch query.Cmd {
 		case "list":
 			results = listAssets(registry, query)
@@ -214,7 +245,111 @@ func filterAssetsByFiles(registry *t6assets.Registry, query QueryConfig, targetF
 	return results
 }
 
-// indexFastFilesParallel indexes all FastFiles in the zone directory using parallel processing
+// filterAssetsByFilesAndType filters assets that match both target files AND map files
+func filterAssetsByFilesAndType(registry *t6assets.Registry, query QueryConfig, targetFiles map[string]bool, mapFiles map[string]bool) []*t6assets.Asset {
+	var results []*t6assets.Asset
+
+	// Only process assets from files that are in BOTH targetFiles AND mapFiles
+	for _, asset := range registry.Assets {
+		source := asset.Source
+		if !strings.HasSuffix(source, ".ff") {
+			source = source + ".ff"
+		}
+
+		// Must be in both sets
+		if !targetFiles[source] || !mapFiles[source] {
+			continue
+		}
+
+		// Apply type filter
+		if query.Type != "" {
+			typeList := strings.Split(query.Type, ",")
+			validTypes := make(map[t6assets.AssetType]bool)
+			for _, t := range typeList {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					validTypes[parseAssetType(t)] = true
+				}
+			}
+			if !validTypes[asset.Type] {
+				continue
+			}
+		}
+
+		// Apply pattern filter
+		if query.Pattern != "" {
+			include, exclude := parsePatterns(query.Pattern)
+			if !matchesPatterns(asset.Name, include, exclude, query.UseWildcard, query.IgnoreCase) {
+				continue
+			}
+		}
+
+		results = append(results, asset)
+	}
+
+	return results
+}
+
+// filterAssetsByMapPattern filters assets by map pattern (no type index available)
+func filterAssetsByMapPattern(registry *t6assets.Registry, query QueryConfig) []*t6assets.Asset {
+	var results []*t6assets.Asset
+
+	// Build set of files matching map pattern
+	mapFiles := make(map[string]bool)
+	mapList := strings.Split(query.Map, ",")
+	for _, m := range mapList {
+		m = strings.TrimSpace(m)
+		if m != "" {
+			// Remove .ff extension if present for matching
+			searchTerm := m
+			if strings.HasSuffix(searchTerm, ".ff") {
+				searchTerm = searchTerm[:len(searchTerm)-3]
+			}
+
+			// Find all files matching this map pattern
+			for _, asset := range registry.Assets {
+				if strings.Contains(asset.Source, searchTerm) {
+					mapFiles[asset.Source] = true
+				}
+			}
+		}
+	}
+
+	// Filter assets from matching files
+	for _, asset := range registry.Assets {
+		if !mapFiles[asset.Source] {
+			continue
+		}
+
+		// Apply type filter
+		if query.Type != "" {
+			typeList := strings.Split(query.Type, ",")
+			validTypes := make(map[t6assets.AssetType]bool)
+			for _, t := range typeList {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					validTypes[parseAssetType(t)] = true
+				}
+			}
+			if !validTypes[asset.Type] {
+				continue
+			}
+		}
+
+		// Apply pattern filter
+		if query.Pattern != "" {
+			include, exclude := parsePatterns(query.Pattern)
+			if !matchesPatterns(asset.Name, include, exclude, query.UseWildcard, query.IgnoreCase) {
+				continue
+			}
+		}
+
+		results = append(results, asset)
+	}
+
+	return results
+}
+
 // indexFilesParallel indexes the specified files using parallel processing
 func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache bool) error {
 	if len(ffFiles) == 0 {
