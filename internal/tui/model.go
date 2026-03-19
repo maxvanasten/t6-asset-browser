@@ -2,28 +2,18 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/maxvanasten/t6-asset-browser/internal/fastfile"
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
 )
-
-// normalizeString removes leading/trailing whitespace and normalizes indentation
-func normalizeString(s string) string {
-	return strings.TrimSpace(s)
-}
-
-// normalizeMultiline normalizes a multi-line string by trimming each line
-func normalizeMultiline(s string) string {
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		lines[i] = strings.TrimSpace(line)
-	}
-	return strings.Join(lines, "\n")
-}
 
 // Screen represents the current view in the TUI
 type Screen int
@@ -54,42 +44,6 @@ const (
 	OutputField
 )
 
-// Model represents the TUI state
-type Model struct {
-	// Core state
-	Screen   Screen
-	Mode     Mode
-	Registry *t6assets.Registry
-	ZonePath string
-	UseCache bool
-
-	// Query configuration
-	Query       QueryConfig
-	ActiveField QueryField
-	Fields      []QueryField
-	FieldInputs map[QueryField]*textinput.Model
-
-	// Results
-	Results         []*t6assets.Asset
-	FilteredResults []*t6assets.Asset
-	Viewport        viewport.Model
-	Cursor          int
-	SearchInput     *textinput.Model
-	IsSearching     bool
-
-	// Status
-	StatusMessage string
-	IsLoading     bool
-	Error         error
-
-	// Terminal dimensions
-	Width  int
-	Height int
-
-	// Styles
-	Styles Styles
-}
-
 // QueryConfig holds the query parameters
 type QueryConfig struct {
 	Cmd         string
@@ -103,71 +57,33 @@ type QueryConfig struct {
 	UseWildcard bool
 }
 
-// Styles holds lipgloss styles
-type Styles struct {
-	Title          lipgloss.Style
-	Subtitle       lipgloss.Style
-	FieldLabel     lipgloss.Style
-	FieldValue     lipgloss.Style
-	FieldActive    lipgloss.Style
-	FieldInactive  lipgloss.Style
-	HelpText       lipgloss.Style
-	StatusBar      lipgloss.Style
-	ErrorText      lipgloss.Style
-	LoadingText    lipgloss.Style
-	ResultItem     lipgloss.Style
-	ResultSelected lipgloss.Style
-	SearchBox      lipgloss.Style
-	Container      lipgloss.Style
-}
-
-// DefaultStyles creates default lipgloss styles
-func DefaultStyles() Styles {
-	return Styles{
-		Title: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7D56F4")).
-			MarginLeft(0).
-			MarginBottom(1),
-		Subtitle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#888888")).
-			MarginLeft(0).
-			MarginBottom(1),
-		FieldLabel: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00ADD8")).
-			Width(12),
-		FieldValue: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")),
-		FieldActive: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00ADD8")),
-		FieldInactive: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#CCCCCC")),
-		HelpText: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#888888")),
-		StatusBar: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")),
-		ErrorText: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF5555")),
-		LoadingText: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFD700")),
-		ResultItem: lipgloss.NewStyle().
-			PaddingLeft(2),
-		ResultSelected: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00ADD8")).
-			PaddingLeft(2),
-		SearchBox: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")),
-		Container: lipgloss.NewStyle().
-			PaddingLeft(0).
-			PaddingRight(0),
-	}
+// Model represents the TUI state
+type Model struct {
+	Screen          Screen
+	Mode            Mode
+	Registry        *t6assets.Registry
+	ZonePath        string
+	UseCache        bool
+	Query           QueryConfig
+	ActiveField     QueryField
+	Fields          []QueryField
+	FieldInputs     map[QueryField]*textinput.Model
+	Results         []*t6assets.Asset
+	FilteredResults []*t6assets.Asset
+	Viewport        viewport.Model
+	Cursor          int
+	SearchInput     *textinput.Model
+	IsSearching     bool
+	StatusMessage   string
+	IsLoading       bool
+	Error           error
+	Width           int
+	Height          int
 }
 
 // NewModel creates a new TUI model
 func NewModel(zonePath string, useCache bool) Model {
-	// Initialize query fields
 	fields := []QueryField{CmdField, MapField, TypeField, PatternField, FormatField, OutputField}
-
-	// Initialize text inputs for each field
 	fieldInputs := make(map[QueryField]*textinput.Model)
 
 	for _, field := range fields {
@@ -195,12 +111,10 @@ func NewModel(zonePath string, useCache bool) Model {
 		fieldInputs[field] = &ti
 	}
 
-	// Initialize search input
 	searchInput := textinput.New()
 	searchInput.Placeholder = "Search in results..."
 	searchInput.Width = 40
 
-	// Initialize viewport for results - will be resized on first WindowSizeMsg
 	vp := viewport.New(80, 20)
 
 	return Model{
@@ -221,9 +135,6 @@ func NewModel(zonePath string, useCache bool) Model {
 		IsSearching:     false,
 		StatusMessage:   "Press 'i' to edit field, '?' for help",
 		IsLoading:       false,
-		Styles:          DefaultStyles(),
-		Width:           80,
-		Height:          24,
 	}
 }
 
@@ -239,7 +150,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Handle screen-specific updates
 		switch m.Screen {
 		case QueryBuilderScreen:
 			return m.updateQueryBuilder(msg)
@@ -252,12 +162,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
-		m.Viewport.Width = msg.Width - 4
-		// Reserve space for header, status bar, and help text
-		m.Viewport.Height = msg.Height - 10
-		if m.Viewport.Height < 5 {
-			m.Viewport.Height = 5
-		}
+		m.Viewport.Width = msg.Width - 2
+		m.Viewport.Height = msg.Height - 8
 
 	case LoadCompleteMsg:
 		m.IsLoading = false
@@ -300,9 +206,7 @@ func (m Model) View() string {
 	}
 }
 
-// updateQueryBuilder handles key events in query builder screen
 func (m Model) updateQueryBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// In INSERT mode, pass keys to text input (except Esc to exit)
 	if m.Mode == InsertMode {
 		switch msg.String() {
 		case "esc":
@@ -312,7 +216,6 @@ func (m Model) updateQueryBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 		default:
-			// Pass key to text input
 			activeInput := m.FieldInputs[m.ActiveField]
 			newInput, cmd := activeInput.Update(msg)
 			*m.FieldInputs[m.ActiveField] = newInput
@@ -320,59 +223,42 @@ func (m Model) updateQueryBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// In NORMAL mode, handle vim navigation
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-
 	case "i", "I":
-		// Enter INSERT mode
 		m.Mode = InsertMode
 		m.StatusMessage = "INSERT mode - type to edit, Esc for Normal mode"
 		m.FieldInputs[m.ActiveField].Focus()
 		return m, nil
-
 	case "j", "down":
-		// Move to next field
 		m.ActiveField = m.Fields[(int(m.ActiveField)+1)%len(m.Fields)]
 		return m, nil
-
 	case "k", "up":
-		// Move to previous field
 		idx := int(m.ActiveField) - 1
 		if idx < 0 {
 			idx = len(m.Fields) - 1
 		}
 		m.ActiveField = m.Fields[idx]
 		return m, nil
-
 	case "tab":
-		// Alternative navigation: next field
 		m.ActiveField = m.Fields[(int(m.ActiveField)+1)%len(m.Fields)]
 		return m, nil
-
 	case "shift+tab":
-		// Alternative navigation: previous field
 		idx := int(m.ActiveField) - 1
 		if idx < 0 {
 			idx = len(m.Fields) - 1
 		}
 		m.ActiveField = m.Fields[idx]
 		return m, nil
-
 	case "enter":
-		// Execute query
 		m.IsLoading = true
 		m.StatusMessage = "Loading..."
 		return m, m.executeQuery()
-
 	case "?", "h":
-		// Show help
 		m.Screen = HelpScreen
 		return m, nil
-
 	case "ctrl+l":
-		// Clear all fields
 		for _, field := range m.Fields {
 			m.FieldInputs[field].SetValue("")
 		}
@@ -384,7 +270,6 @@ func (m Model) updateQueryBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateResultsScreen handles key events in results screen
 func (m Model) updateResultsScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.IsSearching {
 		switch msg.String() {
@@ -403,42 +288,30 @@ func (m Model) updateResultsScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-
 	case "esc", "b":
-		// Back to query builder
 		m.Screen = QueryBuilderScreen
 		m.Error = nil
 		return m, nil
-
 	case "j", "down":
-		// Move down
 		if m.Cursor < len(m.FilteredResults)-1 {
 			m.Cursor++
 			m.updateViewport()
 		}
-
 	case "k", "up":
-		// Move up
 		if m.Cursor > 0 {
 			m.Cursor--
 			m.updateViewport()
 		}
-
 	case "g":
-		// Go to top
 		m.Cursor = 0
 		m.updateViewport()
-
 	case "G":
-		// Go to bottom
 		m.Cursor = len(m.FilteredResults) - 1
 		if m.Cursor < 0 {
 			m.Cursor = 0
 		}
 		m.updateViewport()
-
 	case "ctrl+d":
-		// Half page down
 		m.Cursor += m.Viewport.Height / 2
 		if m.Cursor >= len(m.FilteredResults) {
 			m.Cursor = len(m.FilteredResults) - 1
@@ -447,37 +320,25 @@ func (m Model) updateResultsScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.updateViewport()
-
 	case "ctrl+u":
-		// Half page up
 		m.Cursor -= m.Viewport.Height / 2
 		if m.Cursor < 0 {
 			m.Cursor = 0
 		}
 		m.updateViewport()
-
 	case "/":
-		// Start searching
 		m.IsSearching = true
 		return m, m.SearchInput.Focus()
-
 	case "n":
-		// Next search result
 		m.findNext()
-
 	case "N":
-		// Previous search result
 		m.findPrevious()
-
 	case "y":
-		// Copy current result to clipboard (would need implementation)
 		if m.Cursor < len(m.FilteredResults) {
 			asset := m.FilteredResults[m.Cursor]
 			m.StatusMessage = fmt.Sprintf("Copied: %s", asset.Name)
 		}
-
 	case "?", "h":
-		// Show help
 		m.Screen = HelpScreen
 		return m, nil
 	}
@@ -485,11 +346,9 @@ func (m Model) updateResultsScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateHelpScreen handles key events in help screen
 func (m Model) updateHelpScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc", "?", "h":
-		// Return to previous screen
 		if len(m.Results) > 0 {
 			m.Screen = ResultsScreen
 		} else {
@@ -500,15 +359,12 @@ func (m Model) updateHelpScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// viewQueryBuilder renders the query builder screen
 func (m Model) viewQueryBuilder() string {
-	// Check if terminal is too small
 	if m.Width < 40 || m.Height < 15 {
 		return "Terminal too small. Please resize to at least 40x15."
 	}
 
-	// Calculate available width for input fields - constrain more on small terminals
-	availableWidth := m.Width - 15 // Account for cursor (2) + label (12) + padding
+	availableWidth := m.Width - 15
 	if availableWidth < 10 {
 		availableWidth = 10
 	}
@@ -516,26 +372,24 @@ func (m Model) viewQueryBuilder() string {
 		availableWidth = 50
 	}
 
-	// Update input widths
 	for _, field := range m.Fields {
 		m.FieldInputs[field].Width = availableWidth
 	}
 
 	var b strings.Builder
 
-	// Show mode indicator in title
 	modeStr := ""
 	if m.Mode == NormalMode {
 		modeStr = " [NORMAL]"
 	} else {
 		modeStr = " [INSERT]"
 	}
-	b.WriteString(m.Styles.Title.Render("T6 Asset Browser" + modeStr))
+
+	b.WriteString("T6 Asset Browser" + modeStr)
 	b.WriteString("\n")
-	b.WriteString(m.Styles.Subtitle.Render("Configure your query below"))
+	b.WriteString("Configure your query below")
 	b.WriteString("\n\n")
 
-	// Field labels and values
 	fieldLabels := map[QueryField]string{
 		CmdField:     "Command",
 		MapField:     "Map",
@@ -549,103 +403,68 @@ func (m Model) viewQueryBuilder() string {
 		label := fieldLabels[field]
 		input := m.FieldInputs[field]
 
-		var fieldStyle lipgloss.Style
 		if field == m.ActiveField {
-			fieldStyle = m.Styles.FieldActive
-			b.WriteString("► ")
+			b.WriteString("> ")
 		} else {
-			fieldStyle = m.Styles.FieldInactive
 			b.WriteString("  ")
 		}
 
-		b.WriteString(m.Styles.FieldLabel.Render(label + ":"))
+		b.WriteString(label + ": ")
 
 		if field == m.ActiveField {
-			// Truncate input view if too long
-			inputView := normalizeString(input.View())
-			if len(inputView) > availableWidth {
-				inputView = inputView[:availableWidth-3] + "..."
-			}
-			// Render with active style (bold + underline)
-			b.WriteString(" ")
-			b.WriteString(fieldStyle.Render(input.View()))
+			b.WriteString(input.View())
 		} else {
-			displayValue := normalizeString(input.Value())
+			displayValue := input.Value()
 			if displayValue == "" {
-				displayValue = normalizeString(input.Placeholder)
-				b.WriteString(" ")
-				b.WriteString(m.Styles.HelpText.Render(displayValue))
-			} else {
-				// Truncate display value if too long
-				if len(displayValue) > availableWidth {
-					displayValue = displayValue[:availableWidth-3] + "..."
-				}
-				b.WriteString(" ")
-				b.WriteString(fieldStyle.Render(displayValue))
+				displayValue = input.Placeholder
 			}
+			b.WriteString(displayValue)
 		}
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
 
-	// Status/error/loading messages
 	if m.IsLoading {
-		// Show prominent loading indicator
-		loadingMsg := "⏳ Loading..."
+		loadingMsg := "Loading..."
 		if m.Query.Cmd == "export" {
-			loadingMsg = "⏳ Exporting assets..."
+			loadingMsg = "Exporting assets..."
 		}
-		b.WriteString(m.Styles.LoadingText.Render(loadingMsg))
+		b.WriteString(loadingMsg)
 		b.WriteString("\n")
 	} else if m.Error != nil {
-		errorMsg := normalizeString(fmt.Sprintf("❌ Error: %v", m.Error))
-		if len(errorMsg) > m.Width-4 {
-			errorMsg = errorMsg[:m.Width-7] + "..."
-		}
-		b.WriteString(m.Styles.ErrorText.Render(errorMsg))
+		b.WriteString(fmt.Sprintf("Error: %v", m.Error))
 		b.WriteString("\n")
 	} else {
-		statusMsg := normalizeString(m.StatusMessage)
-		if len(statusMsg) > m.Width-4 {
-			statusMsg = statusMsg[:m.Width-7] + "..."
-		}
-		b.WriteString(m.Styles.StatusBar.Render(statusMsg))
+		b.WriteString(m.StatusMessage)
 	}
 
 	b.WriteString("\n")
 	if m.Mode == NormalMode && !m.IsLoading {
-		helpText := "i=insert • j/k=navigate • Enter=execute • ?=help • q=quit"
-		if m.Width < 60 {
-			helpText = "i=insert • j/k=nav • Enter=run • ?=help • q=quit"
-		}
-		b.WriteString(m.Styles.HelpText.Render(normalizeMultiline(helpText)))
+		b.WriteString("i=insert | j/k=navigate | Enter=execute | ?=help | q=quit")
 	} else if m.Mode == InsertMode {
-		b.WriteString(m.Styles.HelpText.Render("INSERT mode • type to edit • Esc=normal mode"))
+		b.WriteString("INSERT mode | type to edit | Esc=normal mode")
 	}
 
-	return m.Styles.Container.Render(b.String())
+	return b.String()
 }
 
-// viewResultsScreen renders the results screen
 func (m Model) viewResultsScreen() string {
-	// Check if terminal is too small
 	if m.Width < 40 || m.Height < 10 {
 		return "Terminal too small. Please resize to at least 40x10."
 	}
 
 	var b strings.Builder
 
-	b.WriteString(m.Styles.Title.Render("Results"))
+	b.WriteString("Results")
 	b.WriteString("\n")
 
 	if m.IsSearching {
-		b.WriteString(m.Styles.SearchBox.Render("/" + m.SearchInput.View()))
+		b.WriteString("/" + m.SearchInput.View())
 		b.WriteString("\n")
 	}
 
-	// Calculate available height for results
-	availableHeight := m.Height - 8 // Reserve space for header, status, and help
+	availableHeight := m.Height - 8
 	if m.IsSearching {
 		availableHeight -= 2
 	}
@@ -653,7 +472,6 @@ func (m Model) viewResultsScreen() string {
 		availableHeight = 5
 	}
 
-	// Build results list
 	var content strings.Builder
 	start := m.Viewport.YOffset
 	end := start + availableHeight
@@ -664,10 +482,9 @@ func (m Model) viewResultsScreen() string {
 		start = 0
 	}
 
-	// Calculate max line width - be more conservative on small terminals
-	maxLineWidth := m.Width - 4 // Minimal padding
+	maxLineWidth := m.Width - 4
 	if maxLineWidth < 30 {
-		maxLineWidth = 30 // Absolute minimum
+		maxLineWidth = 30
 	}
 
 	for i := start; i < end; i++ {
@@ -676,66 +493,55 @@ func (m Model) viewResultsScreen() string {
 		}
 
 		asset := m.FilteredResults[i]
-		line := fmt.Sprintf("[%s] %s (from %s)", asset.Type, normalizeString(asset.Name), asset.Source)
+		line := fmt.Sprintf("[%s] %s (from %s)", asset.Type, asset.Name, asset.Source)
 
-		// Truncate line if too long
 		if len(line) > maxLineWidth {
 			line = line[:maxLineWidth-3] + "..."
 		}
 		line += "\n"
 
 		if i == m.Cursor {
-			content.WriteString(m.Styles.ResultSelected.Render("> " + line))
+			content.WriteString("> " + line)
 		} else {
-			content.WriteString(m.Styles.ResultItem.Render("  " + line))
+			content.WriteString("  " + line)
 		}
 	}
 
-	// Update viewport content
 	m.Viewport.Width = m.Width - 2
 	m.Viewport.Height = availableHeight
 	m.Viewport.SetContent(content.String())
 	b.WriteString(m.Viewport.View())
 
-	// Status bar
 	b.WriteString("\n")
-	status := fmt.Sprintf("%d/%d results • Cursor: %d", len(m.FilteredResults), len(m.Results), m.Cursor+1)
+	status := fmt.Sprintf("%d/%d results | Cursor: %d", len(m.FilteredResults), len(m.Results), m.Cursor+1)
 	if m.StatusMessage != "" && !m.IsSearching {
 		status = m.StatusMessage
 	}
-	if len(status) > m.Width-4 {
-		status = status[:m.Width-7] + "..."
-	}
-	b.WriteString(m.Styles.StatusBar.Render(status))
+	b.WriteString(status)
 
 	b.WriteString("\n")
-	helpText := "j/↓/k/↑ to navigate • g/G for top/bottom • / to search • y to copy • b/esc back • ? help • q quit"
-	if m.Width < 80 {
-		helpText = "j/k=nav • g/G=top/bot • /=search • y=copy • b=back • ?=help • q=quit"
-	}
-	b.WriteString(m.Styles.HelpText.Render(helpText))
+	b.WriteString("j/k=navigate | g/G=top/bottom | /=search | y=copy | b/esc=back | ?=help | q=quit")
 
-	return m.Styles.Container.Render(b.String())
+	return b.String()
 }
 
-// viewHelpScreen renders the help screen
 func (m Model) viewHelpScreen() string {
-	// Check if terminal is too small
 	if m.Width < 30 || m.Height < 10 {
 		return "Terminal too small. Please resize."
 	}
 
 	var b strings.Builder
 
-	b.WriteString(m.Styles.Title.Render("Help"))
+	b.WriteString("Help")
 	b.WriteString("\n\n")
 
-	helpText := "Query Builder - Vim Modes:\n\n"
-
+	var helpText string
 	if m.Width >= 80 {
-		helpText += `NORMAL Mode (default):
+		helpText = `Query Builder - Vim Modes:
+
+NORMAL Mode (default):
   i, I                     Enter INSERT mode to edit field
-  j, ↓, k, ↑              Navigate between fields
+  j, down, k, up          Navigate between fields
   Tab, Shift+Tab          Alternative navigation
   Enter                   Execute the query
   Ctrl+L                  Clear all fields
@@ -748,7 +554,7 @@ INSERT Mode (when editing):
   Ctrl+C                  Quit
 
 Results Screen:
-  j/↓ or k/↑              Move cursor down/up
+  j/down or k/up          Move cursor down/up
   g                       Go to first result
   G                       Go to last result
   Ctrl+D                  Half page down
@@ -760,41 +566,28 @@ Results Screen:
   ? or h                  Show this help
   q or Ctrl+C             Quit`
 	} else if m.Width >= 50 {
-		helpText += `NORMAL Mode:
-  i=insert • j/k=nav • Enter=exec • Ctrl+L=clear • ?=help • q=quit
+		helpText = `Query Builder:
+  i=insert | j/k=nav | Enter=exec | Ctrl+L=clear | ?=help | q=quit
 
 INSERT Mode:
-  Type=edit • Esc=normal • Ctrl+C=quit
+  Type=edit | Esc=normal | Ctrl+C=quit
 
 Results Screen:
-  j/k=nav • g/G=top/bot • /=search • n/N=next/prev • y=copy
-  b/Esc=back • ?=help • q=quit`
+  j/k=nav | g/G=top/bot | /=search | n/N=next/prev | y=copy
+  b/Esc=back | ?=help | q=quit`
 	} else {
-		// Very narrow terminal
-		helpText += `Keys:
+		helpText = `Keys:
   i=edit  j/k=move  Enter=go  ?=help  q=quit
   Esc=normal  Ctrl+C=quit`
 	}
 
-	helpText += `
+	b.WriteString(helpText)
+	b.WriteString("\n\n")
+	b.WriteString("Press q, esc, or ?/h to return")
 
-Query Syntax:
-  -cmd: index, list, search, export
-  -map: Comma-separated map names (zm_tomb, zm_prison)
-  -type: weapon, perk, xmodel, material, image
-  -pattern: Comma-separated with AND logic (! to exclude)
-  -format: plain, json, csv, gsc
-  -output: File path or leave empty for stdout
-`
-
-	b.WriteString(m.Styles.HelpText.Render(helpText))
-	b.WriteString("\n")
-	b.WriteString(m.Styles.StatusBar.Render("Press q, esc, or ?/h to return"))
-
-	return m.Styles.Container.Render(b.String())
+	return b.String()
 }
 
-// updateViewport updates the viewport position based on cursor
 func (m *Model) updateViewport() {
 	if m.Cursor < m.Viewport.YOffset {
 		m.Viewport.YOffset = m.Cursor
@@ -803,7 +596,6 @@ func (m *Model) updateViewport() {
 	}
 }
 
-// filterResults filters results based on search input
 func (m *Model) filterResults() {
 	searchTerm := strings.ToLower(m.SearchInput.Value())
 	if searchTerm == "" {
@@ -824,7 +616,6 @@ func (m *Model) filterResults() {
 	m.Viewport.YOffset = 0
 }
 
-// findNext finds the next occurrence of search term
 func (m *Model) findNext() {
 	searchTerm := strings.ToLower(m.SearchInput.Value())
 	if searchTerm == "" {
@@ -841,7 +632,6 @@ func (m *Model) findNext() {
 	}
 }
 
-// findPrevious finds the previous occurrence of search term
 func (m *Model) findPrevious() {
 	searchTerm := strings.ToLower(m.SearchInput.Value())
 	if searchTerm == "" {
@@ -858,23 +648,19 @@ func (m *Model) findPrevious() {
 	}
 }
 
-// LoadCompleteMsg is sent when query execution completes
 type LoadCompleteMsg struct {
 	Assets []*t6assets.Asset
 	Error  error
 }
 
-// ExportCompleteMsg is sent when export completes
 type ExportCompleteMsg struct {
 	Filename string
 	Count    int
 	Error    error
 }
 
-// executeQuery executes the current query and returns a command
 func (m Model) executeQuery() tea.Cmd {
 	return func() tea.Msg {
-		// Parse query configuration
 		m.Query.Cmd = m.FieldInputs[CmdField].Value()
 		m.Query.Map = m.FieldInputs[MapField].Value()
 		m.Query.Type = m.FieldInputs[TypeField].Value()
@@ -884,10 +670,8 @@ func (m Model) executeQuery() tea.Cmd {
 
 		switch m.Query.Cmd {
 		case "list", "search":
-			// Execute the query
 			return m.runQuery()
 		case "export":
-			// Execute export
 			return m.runExport()
 		default:
 			return LoadCompleteMsg{
@@ -897,7 +681,6 @@ func (m Model) executeQuery() tea.Cmd {
 	}
 }
 
-// runQuery runs the actual query and returns results
 func (m Model) runQuery() tea.Msg {
 	results, err := ExecuteQuery(m.ZonePath, m.Query, m.UseCache)
 	return LoadCompleteMsg{
@@ -906,7 +689,6 @@ func (m Model) runQuery() tea.Msg {
 	}
 }
 
-// runExport runs the export and returns completion message
 func (m Model) runExport() tea.Msg {
 	results, err := ExecuteQuery(m.ZonePath, m.Query, m.UseCache)
 	if err != nil {
@@ -915,17 +697,425 @@ func (m Model) runExport() tea.Msg {
 		}
 	}
 
-	// Determine output file
 	outputFile := m.Query.Output
 	if outputFile == "" {
 		outputFile = "export.txt"
 	}
 
-	// Export the results
 	count, err := ExportToFile(results, m.Query.Format, outputFile)
 	return ExportCompleteMsg{
 		Filename: outputFile,
 		Count:    count,
 		Error:    err,
 	}
+}
+
+func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6assets.Asset, error) {
+	registry := t6assets.NewRegistry()
+
+	var filesToProcess []string
+
+	if query.Map != "" {
+		allFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
+		mapList := strings.Split(query.Map, ",")
+		for _, ffPath := range allFiles {
+			_, fileName := filepath.Split(ffPath)
+			for _, m := range mapList {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					searchTerm := m
+					if strings.HasSuffix(searchTerm, ".ff") {
+						searchTerm = searchTerm[:len(searchTerm)-3]
+					}
+					if strings.Contains(fileName, searchTerm) {
+						filesToProcess = append(filesToProcess, ffPath)
+						break
+					}
+				}
+			}
+		}
+		if len(filesToProcess) > 0 {
+			fmt.Fprintf(os.Stderr, "Processing %d files matching '%s'\n", len(filesToProcess), query.Map)
+		}
+	}
+
+	if len(filesToProcess) == 0 {
+		filesToProcess, _ = filepath.Glob(filepath.Join(zonePath, "*.ff"))
+		fmt.Fprintf(os.Stderr, "Processing all %d files\n", len(filesToProcess))
+	}
+
+	if err := indexFilesParallel(filesToProcess, registry, useCache); err != nil {
+		return nil, fmt.Errorf("failed to index FastFiles: %w", err)
+	}
+
+	var results []*t6assets.Asset
+	switch query.Cmd {
+	case "list":
+		results = filterAssets(registry, query)
+	case "search":
+		results = filterAssets(registry, query)
+	default:
+		return nil, fmt.Errorf("unsupported command: %s", query.Cmd)
+	}
+
+	return results, nil
+}
+
+func filterAssets(registry *t6assets.Registry, query QueryConfig) []*t6assets.Asset {
+	var results []*t6assets.Asset
+
+	for _, asset := range registry.Assets {
+		if query.Type != "" {
+			typeList := strings.Split(query.Type, ",")
+			validTypes := make(map[t6assets.AssetType]bool)
+			for _, t := range typeList {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					validTypes[parseAssetType(t)] = true
+				}
+			}
+			if !validTypes[asset.Type] {
+				continue
+			}
+		}
+
+		if query.Map != "" {
+			mapList := strings.Split(query.Map, ",")
+			matched := false
+			for _, m := range mapList {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					searchTerm := m
+					if strings.HasSuffix(searchTerm, ".ff") {
+						searchTerm = searchTerm[:len(searchTerm)-3]
+					}
+					if strings.Contains(asset.Source, searchTerm) {
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+
+		if query.Pattern != "" {
+			include, exclude := parsePatterns(query.Pattern)
+			if !matchesPatterns(asset.Name, include, exclude, query.UseWildcard, query.IgnoreCase) {
+				continue
+			}
+		}
+
+		results = append(results, asset)
+	}
+
+	return results
+}
+
+func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache bool) error {
+	if len(ffFiles) == 0 {
+		return fmt.Errorf("no files to process")
+	}
+
+	var rawCache *fastfile.Cache
+	if useCache {
+		rawCache, _ = fastfile.NewCache()
+	}
+
+	oat := fastfile.NewOATIntegration()
+	if oat.IsAvailable() {
+		fmt.Fprintf(os.Stderr, "Using OpenAssetTools for decryption\n")
+	}
+
+	totalFiles := len(ffFiles)
+	startTime := time.Now()
+
+	numWorkers := 4
+	if totalFiles < numWorkers {
+		numWorkers = totalFiles
+	}
+
+	fileChan := make(chan string, totalFiles)
+	for _, ffPath := range ffFiles {
+		fileChan <- ffPath
+	}
+	close(fileChan)
+
+	type fileResult struct {
+		fileName string
+		assets   []*t6assets.Asset
+		err      error
+	}
+	resultChan := make(chan fileResult, totalFiles)
+
+	var processedCount int
+	var mu sync.Mutex
+
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			for ffPath := range fileChan {
+				_, fileName := filepath.Split(ffPath)
+
+				assets, err := processSingleFile(ffPath, fileName, oat, rawCache, useCache)
+
+				mu.Lock()
+				processedCount++
+				current := processedCount
+				mu.Unlock()
+
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[%d/%d] Error processing %s: %v\n",
+						current, totalFiles, fileName, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[%d/%d] Indexed: %s (%d assets)\n",
+						current, totalFiles, fileName, len(assets))
+				}
+
+				resultChan <- fileResult{
+					fileName: fileName,
+					assets:   assets,
+					err:      err,
+				}
+			}
+		}(i)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	for result := range resultChan {
+		if result.err == nil {
+			for _, asset := range result.assets {
+				registry.Add(asset)
+			}
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "Total: %d files processed, %d assets indexed in %v\n",
+		totalFiles, len(registry.Assets), time.Since(startTime))
+
+	return nil
+}
+
+func processSingleFile(ffPath, fileName string, oat *fastfile.OATIntegration, rawCache *fastfile.Cache, useCache bool) ([]*t6assets.Asset, error) {
+	var assets []*t6assets.Asset
+
+	if oat.IsAvailable() {
+		assetNames, assetTypes, err := oat.ExtractAndParseZone(ffPath)
+		if err == nil && len(assetNames) > 0 {
+			for _, name := range assetNames {
+				assetType := parseOATAssetType(assetTypes[name])
+				assets = append(assets, &t6assets.Asset{
+					Name:   name,
+					Type:   assetType,
+					Source: fileName,
+				})
+			}
+			return assets, nil
+		}
+	}
+
+	data, err := os.ReadFile(ffPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	reader := fastfile.NewReader()
+	zoneData, err := reader.Read(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	if useCache && rawCache != nil {
+		rawCache.WriteCache(ffPath, zoneData)
+	}
+
+	tempRegistry := t6assets.NewRegistry()
+	parser := fastfile.NewParser(tempRegistry)
+
+	if err := parser.Parse(zoneData, fileName); err != nil {
+		return nil, fmt.Errorf("failed to parse: %w", err)
+	}
+
+	for _, asset := range tempRegistry.Assets {
+		assets = append(assets, asset)
+	}
+
+	return assets, nil
+}
+
+func ExportToFile(assets []*t6assets.Asset, format string, filename string) (int, error) {
+	file, err := os.Create(filename)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	switch format {
+	case "plain", "":
+		for _, a := range assets {
+			fmt.Fprintln(file, a.Name)
+		}
+	case "json":
+		fmt.Fprintln(file, "[")
+		for i, a := range assets {
+			comma := ","
+			if i == len(assets)-1 {
+				comma = ""
+			}
+			fmt.Fprintf(file, "  {\"name\": \"%s\", \"type\": \"%s\", \"source\": \"%s\"}%s\n",
+				a.Name, a.Type, a.Source, comma)
+		}
+		fmt.Fprintln(file, "]")
+	case "csv":
+		fmt.Fprintln(file, "name,type,source")
+		for _, a := range assets {
+			fmt.Fprintf(file, "%s,%s,%s\n", a.Name, a.Type, a.Source)
+		}
+	case "gsc":
+		fmt.Fprintln(file, "array(")
+		for _, a := range assets {
+			fmt.Fprintf(file, "\t\"%s\",\n", a.Name)
+		}
+		fmt.Fprintln(file, ")")
+	default:
+		return 0, fmt.Errorf("unknown format: %s", format)
+	}
+
+	return len(assets), nil
+}
+
+func parseAssetType(s string) t6assets.AssetType {
+	switch s {
+	case "weapon":
+		return t6assets.AssetTypeWeapon
+	case "xmodel":
+		return t6assets.AssetTypeXModel
+	case "perk":
+		return t6assets.AssetTypePerk
+	case "material":
+		return t6assets.AssetTypeMaterial
+	case "image":
+		return t6assets.AssetTypeImage
+	default:
+		return t6assets.AssetTypeUnknown
+	}
+}
+
+func parseOATAssetType(oatType string) t6assets.AssetType {
+	switch oatType {
+	case "weapon":
+		return t6assets.AssetTypeWeapon
+	case "xmodel":
+		return t6assets.AssetTypeXModel
+	case "material":
+		return t6assets.AssetTypeMaterial
+	case "image":
+		return t6assets.AssetTypeImage
+	case "fx":
+		return t6assets.AssetTypeFX
+	case "perk":
+		return t6assets.AssetTypePerk
+	default:
+		return t6assets.AssetTypeUnknown
+	}
+}
+
+func parsePatterns(pattern string) (include []string, exclude []string) {
+	if pattern == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(pattern, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.HasPrefix(part, "!") {
+			exclude = append(exclude, part[1:])
+		} else {
+			include = append(include, part)
+		}
+	}
+	return include, exclude
+}
+
+func matchesPatterns(str string, include []string, exclude []string, useWildcard bool, ignoreCase bool) bool {
+	for _, pattern := range include {
+		var matched bool
+		if useWildcard {
+			if ignoreCase {
+				matched = wildcardMatch(strings.ToLower(str), strings.ToLower(pattern))
+			} else {
+				matched = wildcardMatch(str, pattern)
+			}
+		} else if ignoreCase {
+			matched = containsIgnoreCase(str, pattern)
+		} else {
+			matched = strings.Contains(str, pattern)
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	for _, pattern := range exclude {
+		var matched bool
+		if useWildcard {
+			if ignoreCase {
+				matched = wildcardMatch(strings.ToLower(str), strings.ToLower(pattern))
+			} else {
+				matched = wildcardMatch(str, pattern)
+			}
+		} else if ignoreCase {
+			matched = containsIgnoreCase(str, pattern)
+		} else {
+			matched = strings.Contains(str, pattern)
+		}
+		if matched {
+			return false
+		}
+	}
+
+	return true
+}
+
+func containsIgnoreCase(s, substr string) bool {
+	if len(substr) > len(s) {
+		return false
+	}
+	lowerS := strings.ToLower(s)
+	lowerSubstr := strings.ToLower(substr)
+	return strings.Contains(lowerS, lowerSubstr)
+}
+
+func wildcardMatch(str, pattern string) bool {
+	if len(pattern) == 0 {
+		return len(str) == 0
+	}
+
+	if len(str) == 0 {
+		for _, p := range pattern {
+			if p != '*' {
+				return false
+			}
+		}
+		return true
+	}
+
+	if pattern[0] == '*' {
+		return wildcardMatch(str, pattern[1:]) || wildcardMatch(str[1:], pattern)
+	} else if pattern[0] == '?' || pattern[0] == str[0] {
+		return wildcardMatch(str[1:], pattern[1:])
+	}
+
+	return false
 }
