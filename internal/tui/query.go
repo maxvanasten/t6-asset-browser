@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/maxvanasten/t6-asset-browser/internal/fastfile"
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
@@ -12,12 +13,42 @@ import (
 
 // ExecuteQuery executes a query based on the query configuration and returns assets
 func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6assets.Asset, error) {
-	// Create registry
-	registry := t6assets.NewRegistry()
+	// Try to load from registry cache first
+	var registry *t6assets.Registry
 
-	// Index FastFiles
-	if err := indexFastFiles(zonePath, registry, useCache); err != nil {
-		return nil, fmt.Errorf("failed to index FastFiles: %w", err)
+	if useCache {
+		regCache, err := fastfile.NewRegistryCacheManager()
+		if err == nil {
+			// Find all .ff files
+			ffFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
+
+			// Try to load cached registry
+			cachedRegistry, valid := regCache.LoadRegistry(zonePath, ffFiles)
+			if valid {
+				fmt.Fprintf(os.Stderr, "Loaded %d assets from cache\n", len(cachedRegistry.Assets))
+				registry = cachedRegistry
+			}
+		}
+	}
+
+	// If no valid cache, create new registry and index files
+	if registry == nil {
+		registry = t6assets.NewRegistry()
+
+		if err := indexFastFilesParallel(zonePath, registry, useCache); err != nil {
+			return nil, fmt.Errorf("failed to index FastFiles: %w", err)
+		}
+
+		// Save to registry cache
+		if useCache {
+			regCache, err := fastfile.NewRegistryCacheManager()
+			if err == nil {
+				ffFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
+				if err := regCache.SaveRegistry(zonePath, registry, ffFiles); err == nil {
+					fmt.Fprintf(os.Stderr, "Cached %d assets\n", len(registry.Assets))
+				}
+			}
+		}
 	}
 
 	var results []*t6assets.Asset
@@ -35,8 +66,8 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 	return results, nil
 }
 
-// indexFastFiles indexes all FastFiles in the zone directory
-func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool) error {
+// indexFastFilesParallel indexes all FastFiles in the zone directory using parallel processing
+func indexFastFilesParallel(zonePath string, registry *t6assets.Registry, useCache bool) error {
 	// Find all .ff files
 	ffFiles, err := filepath.Glob(filepath.Join(zonePath, "*.ff"))
 	if err != nil {
@@ -47,10 +78,10 @@ func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool)
 		return fmt.Errorf("no FastFiles found in %s", zonePath)
 	}
 
-	// Initialize cache if requested
-	var cache *fastfile.Cache
+	// Initialize traditional cache for raw decrypted data
+	var rawCache *fastfile.Cache
 	if useCache {
-		cache, _ = fastfile.NewCache()
+		rawCache, _ = fastfile.NewCache()
 	}
 
 	// Check for OAT
@@ -59,63 +90,149 @@ func indexFastFiles(zonePath string, registry *t6assets.Registry, useCache bool)
 		fmt.Fprintf(os.Stderr, "Using OpenAssetTools for decryption\n")
 	}
 
-	parser := fastfile.NewParser(registry)
+	totalFiles := len(ffFiles)
+	fmt.Fprintf(os.Stderr, "Indexing %d FastFiles...\n", totalFiles)
 
+	// Create a worker pool for parallel processing
+	// Use 4 workers or number of files, whichever is smaller
+	numWorkers := 4
+	if totalFiles < numWorkers {
+		numWorkers = totalFiles
+	}
+
+	// Channel for files to process
+	fileChan := make(chan string, totalFiles)
 	for _, ffPath := range ffFiles {
-		_, fileName := filepath.Split(ffPath)
+		fileChan <- ffPath
+	}
+	close(fileChan)
 
-		var zoneData []byte
-		var readErr error
+	// Channel for results
+	type fileResult struct {
+		fileName string
+		assets   []*t6assets.Asset
+		err      error
+	}
+	resultChan := make(chan fileResult, totalFiles)
 
-		// Try cache first
-		if useCache && cache != nil && cache.IsCached(ffPath) {
-			zoneData, readErr = cache.ReadCached(ffPath)
-			if readErr == nil {
-				continue
-			}
-		}
+	// Progress tracking
+	var processedCount int
+	var mu sync.Mutex
 
-		// If not in cache or read failed, try to decrypt
-		if zoneData == nil {
-			if oat.IsAvailable() {
-				// Use OAT ExtractAndParseZone for complete asset list
-				assetNames, assetTypes, oatErr := oat.ExtractAndParseZone(ffPath)
-				if oatErr == nil && len(assetNames) > 0 {
-					for _, name := range assetNames {
-						assetType := parseOATAssetType(assetTypes[name])
-						asset := &t6assets.Asset{
-							Name:   name,
-							Type:   assetType,
-							Source: fileName,
-						}
-						registry.Add(asset)
-					}
-					continue
+	// Start workers
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			for ffPath := range fileChan {
+				_, fileName := filepath.Split(ffPath)
+
+				assets, err := processSingleFile(ffPath, fileName, oat, rawCache, useCache)
+
+				mu.Lock()
+				processedCount++
+				current := processedCount
+				mu.Unlock()
+
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[%d/%d] Error processing %s: %v\n", current, totalFiles, fileName, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[%d/%d] Indexed: %s (%d assets)\n", current, totalFiles, fileName, len(assets))
+				}
+
+				resultChan <- fileResult{
+					fileName: fileName,
+					assets:   assets,
+					err:      err,
 				}
 			}
+		}(i)
+	}
 
-			// Fall back to built-in reader
-			data, readErr := os.ReadFile(ffPath)
-			if readErr != nil {
-				continue
-			}
-			reader := fastfile.NewReader()
-			zoneData, err = reader.Read(data)
-			if err != nil {
-				continue
-			}
+	// Close result channel when all workers are done
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
 
-			// Cache the decrypted data
-			if useCache && cache != nil && zoneData != nil {
-				cache.WriteCache(ffPath, zoneData)
+	// Collect results and add to registry
+	for result := range resultChan {
+		if result.err == nil {
+			for _, asset := range result.assets {
+				registry.Add(asset)
 			}
 		}
-
-		// Parse assets
-		parser.Parse(zoneData, fileName)
 	}
 
 	return nil
+}
+
+// processSingleFile processes a single FastFile and returns its assets
+func processSingleFile(ffPath, fileName string, oat *fastfile.OATIntegration, rawCache *fastfile.Cache, useCache bool) ([]*t6assets.Asset, error) {
+	var assets []*t6assets.Asset
+
+	// Try OAT first (fastest method)
+	if oat.IsAvailable() {
+		assetNames, assetTypes, err := oat.ExtractAndParseZone(ffPath)
+		if err == nil && len(assetNames) > 0 {
+			for _, name := range assetNames {
+				assetType := parseOATAssetType(assetTypes[name])
+				assets = append(assets, &t6assets.Asset{
+					Name:   name,
+					Type:   assetType,
+					Source: fileName,
+				})
+			}
+			return assets, nil
+		}
+	}
+
+	// Try raw cache second
+	var zoneData []byte
+	if useCache && rawCache != nil && rawCache.IsCached(ffPath) {
+		data, err := rawCache.ReadCached(ffPath)
+		if err == nil {
+			zoneData = data
+		}
+	}
+
+	// Fall back to built-in decryption
+	if zoneData == nil {
+		data, err := os.ReadFile(ffPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read file: %w", err)
+		}
+
+		reader := fastfile.NewReader()
+		decrypted, err := reader.Read(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt: %w", err)
+		}
+		zoneData = decrypted
+
+		// Cache the decrypted data
+		if useCache && rawCache != nil {
+			rawCache.WriteCache(ffPath, zoneData)
+		}
+	}
+
+	// Parse assets from zone data
+	// Create a temporary registry to collect assets from this file
+	tempRegistry := t6assets.NewRegistry()
+	parser := fastfile.NewParser(tempRegistry)
+
+	if err := parser.Parse(zoneData, fileName); err != nil {
+		return nil, fmt.Errorf("failed to parse: %w", err)
+	}
+
+	// Extract assets from temp registry
+	for _, asset := range tempRegistry.Assets {
+		assets = append(assets, asset)
+	}
+
+	return assets, nil
 }
 
 // listAssets returns filtered assets for list command
@@ -239,7 +356,7 @@ func searchAssets(registry *t6assets.Registry, query QueryConfig) []*t6assets.As
 	return results
 }
 
-// Helper functions (copied from main.go for self-containment)
+// Helper functions
 
 func parseAssetType(s string) t6assets.AssetType {
 	switch s {
