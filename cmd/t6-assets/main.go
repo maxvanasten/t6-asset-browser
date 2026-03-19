@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/maxvanasten/t6-asset-browser/internal/fastfile"
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
@@ -15,6 +16,8 @@ import (
 const version = "0.5.0"
 
 func main() {
+	startTime := time.Now()
+
 	var (
 		zoneDir     = flag.String("zone-dir", "", "Path to zone directory (default: auto-detect)")
 		command     = flag.String("cmd", "index", "Command: index, list, search, export")
@@ -72,7 +75,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error indexing: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Indexed %d assets\n", len(registry.Assets))
+		fmt.Printf("Indexed %d assets (took %v)\n", len(registry.Assets), time.Since(startTime))
 
 	case "list":
 		err := indexFastFiles(zonePath, registry, *useCache)
@@ -81,6 +84,7 @@ func main() {
 			os.Exit(1)
 		}
 		listAssets(registry, *assetMap, *assetType, *sortBy)
+		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
 
 	case "search":
 		if len(flag.Args()) == 0 {
@@ -93,6 +97,7 @@ func main() {
 			os.Exit(1)
 		}
 		searchAssets(registry, flag.Args()[0], *assetMap, *assetType, *ignoreCase, *sortBy, *useWildcard)
+		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
 
 	case "export":
 		err := indexFastFiles(zonePath, registry, *useCache)
@@ -105,6 +110,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error exporting: %v\n", err)
 			os.Exit(1)
 		}
+		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", *command)
