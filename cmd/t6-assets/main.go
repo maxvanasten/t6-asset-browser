@@ -92,7 +92,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		searchAssets(registry, flag.Args()[0], *assetType, *assetMap, *ignoreCase, *sortBy, *useWildcard)
+		searchAssets(registry, flag.Args()[0], *assetMap, *assetType, *ignoreCase, *sortBy, *useWildcard)
 
 	case "export":
 		err := indexFastFiles(zonePath, registry, *useCache)
