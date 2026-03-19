@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/maxvanasten/t6-asset-browser/internal/fastfile"
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
@@ -24,25 +25,53 @@ func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6asset
 			ffFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
 
 			// Try to load cached registry
+			startLoad := time.Now()
 			cachedReg, valid := regCache.LoadRegistry(zonePath, ffFiles)
 			if valid {
 				registry = cachedReg.Registry
 				typeToFiles = cachedReg.TypeToFiles
-				fmt.Fprintf(os.Stderr, "Loaded %d assets from cache\n", len(registry.Assets))
+				fmt.Fprintf(os.Stderr, "Loaded %d assets from cache in %v\n", len(registry.Assets), time.Since(startLoad))
 			}
 		}
 	}
 
-	// If no valid cache, create new registry and index files
+	// If no valid cache, create new registry and index ONLY the files we need
 	if registry == nil {
 		registry = t6assets.NewRegistry()
 
-		if err := indexFastFilesParallel(zonePath, registry, useCache); err != nil {
+		// Determine which files to process based on the query
+		var filesToProcess []string
+
+		if query.Map != "" {
+			// Only process the specific map files requested
+			mapList := strings.Split(query.Map, ",")
+			for _, m := range mapList {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					// Ensure .ff extension
+					if !strings.HasSuffix(m, ".ff") {
+						m = m + ".ff"
+					}
+					filePath := filepath.Join(zonePath, m)
+					// Verify file exists
+					if _, err := os.Stat(filePath); err == nil {
+						filesToProcess = append(filesToProcess, filePath)
+					}
+				}
+			}
+		}
+
+		// If no specific maps or files not found, process all files
+		if len(filesToProcess) == 0 {
+			filesToProcess, _ = filepath.Glob(filepath.Join(zonePath, "*.ff"))
+		}
+
+		if err := indexFilesParallel(filesToProcess, registry, useCache); err != nil {
 			return nil, fmt.Errorf("failed to index FastFiles: %w", err)
 		}
 
-		// Save to registry cache
-		if useCache {
+		// Only save to cache if we processed all files (not a subset)
+		if useCache && query.Map == "" {
 			regCache, err := fastfile.NewRegistryCacheManager()
 			if err == nil {
 				ffFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
@@ -176,15 +205,10 @@ func filterAssetsByFiles(registry *t6assets.Registry, query QueryConfig, targetF
 }
 
 // indexFastFilesParallel indexes all FastFiles in the zone directory using parallel processing
-func indexFastFilesParallel(zonePath string, registry *t6assets.Registry, useCache bool) error {
-	// Find all .ff files
-	ffFiles, err := filepath.Glob(filepath.Join(zonePath, "*.ff"))
-	if err != nil {
-		return fmt.Errorf("failed to find FastFiles: %w", err)
-	}
-
+// indexFilesParallel indexes the specified files using parallel processing
+func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache bool) error {
 	if len(ffFiles) == 0 {
-		return fmt.Errorf("no FastFiles found in %s", zonePath)
+		return fmt.Errorf("no files to process")
 	}
 
 	// Initialize traditional cache for raw decrypted data
@@ -200,6 +224,7 @@ func indexFastFilesParallel(zonePath string, registry *t6assets.Registry, useCac
 	}
 
 	totalFiles := len(ffFiles)
+	startTime := time.Now()
 	fmt.Fprintf(os.Stderr, "Indexing %d FastFiles...\n", totalFiles)
 
 	// First pass: check which files are already cached
@@ -317,8 +342,8 @@ func indexFastFilesParallel(zonePath string, registry *t6assets.Registry, useCac
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "Total: %d files processed (%d from cache), %d assets indexed\n",
-		totalFiles, cachedCount, len(registry.Assets))
+	fmt.Fprintf(os.Stderr, "Total: %d files processed (%d from cache), %d assets indexed in %v\n",
+		totalFiles, cachedCount, len(registry.Assets), time.Since(startTime))
 
 	return nil
 }
