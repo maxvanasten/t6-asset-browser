@@ -1012,8 +1012,8 @@ func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache 
 				mu.Lock()
 				processedCount++
 				current := processedCount
-				mu.Unlock()
 
+				// Print while holding lock to prevent interleaved output
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "[%d/%d] Error processing %s: %v\n",
 						current, totalFiles, fileName, err)
@@ -1021,6 +1021,7 @@ func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache 
 					fmt.Fprintf(os.Stderr, "[%d/%d] Indexed: %s (%d assets)\n",
 						current, totalFiles, fileName, len(assets))
 				}
+				mu.Unlock()
 
 				resultChan <- fileResult{
 					fileName: fileName,
