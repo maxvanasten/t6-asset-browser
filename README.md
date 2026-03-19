@@ -100,15 +100,16 @@ t6-assets -tui
 ### TUI Controls
 
 **Query Builder:**
-- `Tab/↓/j` - Navigate to next field
-- `Shift+Tab/↑/k` - Navigate to previous field
+- `Tab` or `↓` - Navigate to next field
+- `Shift+Tab` or `↑` - Navigate to previous field
 - `Enter` - Execute query
 - `Ctrl+L` - Clear all fields
 - `?` or `h` - Show help
 - `q` or `Ctrl+C` - Quit
 
 **Results Screen:**
-- `j/↓` or `k/↑` - Navigate results
+- `j` or `↓` - Navigate down
+- `k` or `↑` - Navigate up
 - `g` - Go to first result
 - `G` - Go to last result
 - `Ctrl+D` - Half page down

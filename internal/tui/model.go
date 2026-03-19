@@ -214,6 +214,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// First, update the active text input to capture typed characters
+		if m.Screen == QueryBuilderScreen {
+			activeInput := m.FieldInputs[m.ActiveField]
+			newInput, cmd := activeInput.Update(msg)
+			*m.FieldInputs[m.ActiveField] = newInput
+			cmds = append(cmds, cmd)
+		} else if m.Screen == ResultsScreen && m.IsSearching {
+			newInput, cmd := m.SearchInput.Update(msg)
+			*m.SearchInput = newInput
+			cmds = append(cmds, cmd)
+			m.filterResults()
+		}
+
+		// Then handle navigation keys
 		switch m.Screen {
 		case QueryBuilderScreen:
 			return m.updateQueryBuilder(msg)
@@ -241,24 +255,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Update active field input
-	if m.Screen == QueryBuilderScreen {
-		activeInput := m.FieldInputs[m.ActiveField]
-		newInput, cmd := activeInput.Update(msg)
-		*m.FieldInputs[m.ActiveField] = newInput
-		cmds = append(cmds, cmd)
-	}
-
-	// Update search input in results screen
-	if m.Screen == ResultsScreen && m.IsSearching {
-		newInput, cmd := m.SearchInput.Update(msg)
-		*m.SearchInput = newInput
-		cmds = append(cmds, cmd)
-
-		// Filter results in real-time
-		m.filterResults()
-	}
-
 	return m, tea.Batch(cmds...)
 }
 
@@ -282,19 +278,21 @@ func (m Model) updateQueryBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 
-	case "tab", "down", "j":
-		// Move to next field
+	case "tab", "down":
+		// Move to next field (only use Tab/Down arrows, not j/k)
 		m.ActiveField = m.Fields[(int(m.ActiveField)+1)%len(m.Fields)]
-		return m, m.FieldInputs[m.ActiveField].Focus()
+		m.FieldInputs[m.ActiveField].Focus()
+		return m, nil
 
-	case "shift+tab", "up", "k":
-		// Move to previous field
+	case "shift+tab", "up":
+		// Move to previous field (only use Shift+Tab/Up arrows, not k)
 		idx := int(m.ActiveField) - 1
 		if idx < 0 {
 			idx = len(m.Fields) - 1
 		}
 		m.ActiveField = m.Fields[idx]
-		return m, m.FieldInputs[m.ActiveField].Focus()
+		m.FieldInputs[m.ActiveField].Focus()
+		return m, nil
 
 	case "enter":
 		// Execute query
@@ -494,7 +492,7 @@ func (m Model) viewQueryBuilder() string {
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(m.Styles.HelpText.Render("Press Enter to execute • Tab/↓/j to navigate • ? for help • q to quit"))
+	b.WriteString(m.Styles.HelpText.Render("Press Enter to execute • Tab/↓/↑ to navigate • ? for help • q to quit"))
 
 	return b.String()
 }
@@ -564,24 +562,24 @@ func (m Model) viewHelpScreen() string {
 
 	helpText := `
 Query Builder Keys:
-  j/↓/k/↑ or Tab/Shift+Tab  Navigate between fields
-  Enter                     Execute the query
-  Ctrl+L                    Clear all fields
-  ? or h                    Show this help
-  q or Ctrl+C               Quit
+  Tab/↓ or Shift+Tab/↑     Navigate between fields
+  Enter                    Execute the query
+  Ctrl+L                   Clear all fields
+  ? or h                   Show this help
+  q or Ctrl+C              Quit
 
 Results Screen Keys:
-  j/↓ or k/↑                Move cursor down/up
-  g                         Go to first result
-  G                         Go to last result
-  Ctrl+D                    Half page down
-  Ctrl+U                    Half page up
-  /                         Search in results
-  n/N                       Next/previous search result
-  y                         Copy current item name
-  b or Esc                  Back to query builder
-  ? or h                    Show this help
-  q or Ctrl+C               Quit
+  j/↓ or k/↑               Move cursor down/up
+  g                        Go to first result
+  G                        Go to last result
+  Ctrl+D                   Half page down
+  Ctrl+U                   Half page up
+  /                        Search in results
+  n/N                      Next/previous search result
+  y                        Copy current item name
+  b or Esc                 Back to query builder
+  ? or h                   Show this help
+  q or Ctrl+C              Quit
 
 Query Syntax:
   -cmd:    index, list, search, export
