@@ -127,11 +127,11 @@ func DefaultStyles() Styles {
 		Title: lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#7D56F4")).
-			MarginLeft(2).
+			MarginLeft(0).
 			MarginBottom(1),
 		Subtitle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#888888")).
-			MarginLeft(2).
+			MarginLeft(0).
 			MarginBottom(1),
 		FieldLabel: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#00ADD8")).
@@ -142,9 +142,11 @@ func DefaultStyles() Styles {
 		FieldActive: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#000000")).
 			Background(lipgloss.Color("#7D56F4")).
-			Bold(true),
+			Bold(true).
+			MaxWidth(60),
 		FieldInactive: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#CCCCCC")),
+			Foreground(lipgloss.Color("#CCCCCC")).
+			MaxWidth(60),
 		HelpText: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#888888")),
 		StatusBar: lipgloss.NewStyle().
@@ -166,15 +168,16 @@ func DefaultStyles() Styles {
 		ResultSelected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#000000")).
 			Background(lipgloss.Color("#7D56F4")).
-			PaddingLeft(2),
+			PaddingLeft(2).
+			MaxWidth(200),
 		SearchBox: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color("#444444")).
 			PaddingLeft(1).
 			PaddingRight(1),
 		Container: lipgloss.NewStyle().
-			PaddingLeft(2).
-			PaddingRight(2),
+			PaddingLeft(0).
+			PaddingRight(0),
 	}
 }
 
