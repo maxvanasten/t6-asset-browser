@@ -125,7 +125,6 @@ type Styles struct {
 func DefaultStyles() Styles {
 	return Styles{
 		Title: lipgloss.NewStyle().
-			Bold(true).
 			Foreground(lipgloss.Color("#7D56F4")).
 			MarginLeft(0).
 			MarginBottom(1),
@@ -135,42 +134,28 @@ func DefaultStyles() Styles {
 			MarginBottom(1),
 		FieldLabel: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#00ADD8")).
-			Bold(true).
 			Width(12),
 		FieldValue: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")),
 		FieldActive: lipgloss.NewStyle().
-			Bold(true).
-			Underline(true),
+			Foreground(lipgloss.Color("#00ADD8")),
 		FieldInactive: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#CCCCCC")),
 		HelpText: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#888888")),
 		StatusBar: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#333333")).
-			PaddingLeft(1).
-			PaddingRight(1),
+			Foreground(lipgloss.Color("#FFFFFF")),
 		ErrorText: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF5555")).
-			Bold(true),
+			Foreground(lipgloss.Color("#FF5555")),
 		LoadingText: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFD700")).
-			Background(lipgloss.Color("#333333")).
-			Bold(true).
-			PaddingLeft(1).
-			PaddingRight(1),
+			Foreground(lipgloss.Color("#FFD700")),
 		ResultItem: lipgloss.NewStyle().
 			PaddingLeft(2),
 		ResultSelected: lipgloss.NewStyle().
-			Bold(true).
-			Underline(true).
+			Foreground(lipgloss.Color("#00ADD8")).
 			PaddingLeft(2),
 		SearchBox: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#444444")).
-			PaddingLeft(1).
-			PaddingRight(1),
+			Foreground(lipgloss.Color("#FFFFFF")),
 		Container: lipgloss.NewStyle().
 			PaddingLeft(0).
 			PaddingRight(0),
