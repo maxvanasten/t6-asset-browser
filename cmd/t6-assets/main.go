@@ -31,6 +31,7 @@ func main() {
 		showVersion = flag.Bool("version", false, "Show version and exit")
 		sortBy      = flag.String("sort", "name", "Sort output by: name, type, source")
 		useWildcard = flag.Bool("wildcard", false, "Use wildcard pattern matching (* and ?)")
+		pattern     = flag.String("pattern", "", "Search pattern (required for search command)")
 	)
 	flag.Parse()
 
@@ -87,8 +88,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
 
 	case "search":
-		if len(flag.Args()) == 0 {
-			fmt.Fprintf(os.Stderr, "Error: search requires a pattern\n")
+		if *pattern == "" {
+			fmt.Fprintf(os.Stderr, "Error: search requires -pattern flag\n")
 			os.Exit(1)
 		}
 		err := indexFastFiles(zonePath, registry, *useCache)
@@ -96,7 +97,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		searchAssets(registry, flag.Args()[0], *assetMap, *assetType, *ignoreCase, *sortBy, *useWildcard)
+		searchAssets(registry, *pattern, *assetType, *assetMap, *ignoreCase, *sortBy, *useWildcard)
 		fmt.Fprintf(os.Stderr, "\nTime: %v\n", time.Since(startTime))
 
 	case "export":
