@@ -202,78 +202,123 @@ func indexFastFilesParallel(zonePath string, registry *t6assets.Registry, useCac
 	totalFiles := len(ffFiles)
 	fmt.Fprintf(os.Stderr, "Indexing %d FastFiles...\n", totalFiles)
 
-	// Create a worker pool for parallel processing
-	// Use 4 workers or number of files, whichever is smaller
-	numWorkers := 4
-	if totalFiles < numWorkers {
-		numWorkers = totalFiles
-	}
+	// First pass: check which files are already cached
+	// Process cached files immediately (no need for workers)
+	var cachedAssets []*t6assets.Asset
+	var filesToProcess []string
+	var cachedCount int
 
-	// Channel for files to process
-	fileChan := make(chan string, totalFiles)
 	for _, ffPath := range ffFiles {
-		fileChan <- ffPath
-	}
-	close(fileChan)
+		_, fileName := filepath.Split(ffPath)
 
-	// Channel for results
-	type fileResult struct {
-		fileName string
-		assets   []*t6assets.Asset
-		err      error
-	}
-	resultChan := make(chan fileResult, totalFiles)
-
-	// Progress tracking
-	var processedCount int
-	var mu sync.Mutex
-
-	// Start workers
-	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-
-			for ffPath := range fileChan {
-				_, fileName := filepath.Split(ffPath)
-
-				assets, err := processSingleFile(ffPath, fileName, oat, rawCache, useCache)
-
-				mu.Lock()
-				processedCount++
-				current := processedCount
-				mu.Unlock()
-
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "[%d/%d] Error processing %s: %v\n", current, totalFiles, fileName, err)
-				} else {
-					fmt.Fprintf(os.Stderr, "[%d/%d] Indexed: %s (%d assets)\n", current, totalFiles, fileName, len(assets))
-				}
-
-				resultChan <- fileResult{
-					fileName: fileName,
-					assets:   assets,
-					err:      err,
+		// Check if file is in raw cache
+		if useCache && rawCache != nil && rawCache.IsCached(ffPath) {
+			// Read from cache
+			zoneData, err := rawCache.ReadCached(ffPath)
+			if err == nil {
+				// Parse the cached data
+				tempRegistry := t6assets.NewRegistry()
+				parser := fastfile.NewParser(tempRegistry)
+				if err := parser.Parse(zoneData, fileName); err == nil {
+					for _, asset := range tempRegistry.Assets {
+						cachedAssets = append(cachedAssets, asset)
+					}
+					cachedCount++
+					fmt.Fprintf(os.Stderr, "[%d/%d] [cached] Indexed: %s (%d assets)\n",
+						cachedCount, totalFiles, fileName, len(tempRegistry.Assets))
+					continue
 				}
 			}
-		}(i)
+		}
+
+		// Not cached or cache read failed - needs processing
+		filesToProcess = append(filesToProcess, ffPath)
 	}
 
-	// Close result channel when all workers are done
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
+	// Add cached assets to registry
+	for _, asset := range cachedAssets {
+		registry.Add(asset)
+	}
 
-	// Collect results and add to registry
-	for result := range resultChan {
-		if result.err == nil {
-			for _, asset := range result.assets {
-				registry.Add(asset)
+	// Process non-cached files in parallel
+	if len(filesToProcess) > 0 {
+		// Create a worker pool
+		numWorkers := 4
+		if len(filesToProcess) < numWorkers {
+			numWorkers = len(filesToProcess)
+		}
+
+		// Channel for files to process
+		fileChan := make(chan string, len(filesToProcess))
+		for _, ffPath := range filesToProcess {
+			fileChan <- ffPath
+		}
+		close(fileChan)
+
+		// Channel for results
+		type fileResult struct {
+			fileName string
+			assets   []*t6assets.Asset
+			err      error
+		}
+		resultChan := make(chan fileResult, len(filesToProcess))
+
+		// Progress tracking
+		var processedCount int
+		var mu sync.Mutex
+
+		// Start workers
+		var wg sync.WaitGroup
+		for i := 0; i < numWorkers; i++ {
+			wg.Add(1)
+			go func(workerID int) {
+				defer wg.Done()
+
+				for ffPath := range fileChan {
+					_, fileName := filepath.Split(ffPath)
+
+					assets, err := processSingleFile(ffPath, fileName, oat, rawCache, useCache)
+
+					mu.Lock()
+					processedCount++
+					currentCount := cachedCount + processedCount
+					mu.Unlock()
+
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "[%d/%d] Error processing %s: %v\n",
+							currentCount, totalFiles, fileName, err)
+					} else {
+						fmt.Fprintf(os.Stderr, "[%d/%d] Indexed: %s (%d assets)\n",
+							currentCount, totalFiles, fileName, len(assets))
+					}
+
+					resultChan <- fileResult{
+						fileName: fileName,
+						assets:   assets,
+						err:      err,
+					}
+				}
+			}(i)
+		}
+
+		// Close result channel when all workers are done
+		go func() {
+			wg.Wait()
+			close(resultChan)
+		}()
+
+		// Collect results and add to registry
+		for result := range resultChan {
+			if result.err == nil {
+				for _, asset := range result.assets {
+					registry.Add(asset)
+				}
 			}
 		}
 	}
+
+	fmt.Fprintf(os.Stderr, "Total: %d files processed (%d from cache), %d assets indexed\n",
+		totalFiles, cachedCount, len(registry.Assets))
 
 	return nil
 }
