@@ -554,10 +554,8 @@ func (m Model) viewResultsScreen() string {
 		availableHeight = 5
 	}
 
-	maxLineWidth := m.Width - 4
-	if maxLineWidth < 30 {
-		maxLineWidth = 30
-	}
+	// Calculate max content width (accounting for cursor and styling)
+	maxContentWidth := m.Width - 4 // Space for cursor (2) + some padding
 
 	// Calculate which items to show
 	start := m.Viewport.YOffset
@@ -573,21 +571,35 @@ func (m Model) viewResultsScreen() string {
 		}
 
 		asset := m.FilteredResults[i]
-
-		// Build styled line
-		line := fmt.Sprintf("[%s] %s (from %s)",
-			typeStyle.Render(asset.Type.String()),
-			asset.Name,
-			sourceStyle.Render(asset.Source))
-
-		if len(line) > maxLineWidth {
-			line = line[:maxLineWidth-3] + "..."
+		cursor := "> "
+		if i != m.Cursor {
+			cursor = "  "
 		}
 
+		// Build the line components
+		typeStr := typeStyle.Render(asset.Type.String())
+		sourceStr := sourceStyle.Render(asset.Source)
+
+		// Calculate available space for the name
+		// Account for: cursor + [type] + name + (from source)
+		// Need to be conservative since lipgloss adds ANSI codes
+		availableForName := maxContentWidth - 20 // Rough estimate for brackets, spaces, etc
+		if availableForName < 10 {
+			availableForName = 10
+		}
+
+		name := asset.Name
+		if len(name) > availableForName {
+			name = name[:availableForName-3] + "..."
+		}
+
+		// Assemble the full line
+		line := fmt.Sprintf("%s[%s] %s (from %s)", cursor, typeStr, name, sourceStr)
+
 		if i == m.Cursor {
-			b.WriteString(resultSelectedStyle.Render(" " + line))
+			b.WriteString(resultSelectedStyle.Render(line))
 		} else {
-			b.WriteString(resultItemStyle.Render("  " + line))
+			b.WriteString(resultItemStyle.Render(line))
 		}
 		b.WriteString("\n")
 	}
