@@ -220,8 +220,8 @@ git push origin main
    # Export weapons from Origins as GSC array
    ./t6-assets -cmd=export -map=zm_tomb -type=weapon -format=gsc
    
-   # Search for raygun variants across all maps
-   ./t6-assets -cmd=search raygun
+    # Search for raygun variants across all maps
+    ./t6-assets -cmd=search -pattern=raygun
    ```
    
    ### Assets

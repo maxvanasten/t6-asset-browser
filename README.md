@@ -80,7 +80,7 @@ t6-assets -cmd=index
 t6-assets -cmd=export -map=zm_tomb -type=weapon -format=gsc
 
 # Search for raygun variants
-t6-assets -cmd=search raygun
+t6-assets -cmd=search -pattern=raygun
 ```
 
 ## Usage Examples
@@ -129,7 +129,7 @@ Total: 8 assets
 ### Example 3: Search for Raygun Variants
 
 ```bash
-$ t6-assets -cmd=search raygun
+$ t6-assets -cmd=search -pattern=raygun
 
 [weapon] ray_gun_zm (from zm_tomb.ff)
 [weapon] ray_gun_upgraded_zm (from zm_tomb.ff)
@@ -155,7 +155,7 @@ ls maxlib_*_weapons.gsc
 ### Example 5: Search with Type Filter
 
 ```bash
-$ t6-assets -cmd=search ak47 -type=weapon
+$ t6-assets -cmd=search -pattern=ak47 -type=weapon
 
 [weapon] ak47_zm (from zm_tomb.ff)
 [weapon] ak47_upgraded_zm (from zm_tomb.ff)
