@@ -327,23 +327,7 @@ func indexFastFilesParallel(zonePath string, registry *t6assets.Registry, useCac
 func processSingleFile(ffPath, fileName string, oat *fastfile.OATIntegration, rawCache *fastfile.Cache, useCache bool) ([]*t6assets.Asset, error) {
 	var assets []*t6assets.Asset
 
-	// Try OAT first (fastest method)
-	if oat.IsAvailable() {
-		assetNames, assetTypes, err := oat.ExtractAndParseZone(ffPath)
-		if err == nil && len(assetNames) > 0 {
-			for _, name := range assetNames {
-				assetType := parseOATAssetType(assetTypes[name])
-				assets = append(assets, &t6assets.Asset{
-					Name:   name,
-					Type:   assetType,
-					Source: fileName,
-				})
-			}
-			return assets, nil
-		}
-	}
-
-	// Try raw cache second
+	// Try raw cache FIRST (before OAT)
 	var zoneData []byte
 	if useCache && rawCache != nil && rawCache.IsCached(ffPath) {
 		data, err := rawCache.ReadCached(ffPath)
@@ -352,8 +336,26 @@ func processSingleFile(ffPath, fileName string, oat *fastfile.OATIntegration, ra
 		}
 	}
 
-	// Fall back to built-in decryption
+	// If not in cache, try decryption methods
 	if zoneData == nil {
+		// Try OAT first (fastest method when available)
+		if oat.IsAvailable() {
+			assetNames, assetTypes, err := oat.ExtractAndParseZone(ffPath)
+			if err == nil && len(assetNames) > 0 {
+				// OAT succeeded - extract assets directly
+				for _, name := range assetNames {
+					assetType := parseOATAssetType(assetTypes[name])
+					assets = append(assets, &t6assets.Asset{
+						Name:   name,
+						Type:   assetType,
+						Source: fileName,
+					})
+				}
+				return assets, nil
+			}
+		}
+
+		// Fall back to built-in decryption
 		data, err := os.ReadFile(ffPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read file: %w", err)
@@ -372,7 +374,7 @@ func processSingleFile(ffPath, fileName string, oat *fastfile.OATIntegration, ra
 		}
 	}
 
-	// Parse assets from zone data
+	// Parse assets from zone data (either from cache or built-in decryption)
 	// Create a temporary registry to collect assets from this file
 	tempRegistry := t6assets.NewRegistry()
 	parser := fastfile.NewParser(tempRegistry)
