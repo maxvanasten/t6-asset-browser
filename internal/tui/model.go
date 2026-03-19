@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/maxvanasten/t6-asset-browser/internal/fastfile"
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
 )
@@ -281,8 +282,13 @@ func (m Model) updateResultsScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			m.IsSearching = false
 			return m, nil
+		default:
+			// Pass key to search input so user can type
+			newInput, cmd := m.SearchInput.Update(msg)
+			*m.SearchInput = newInput
+			m.filterResults()
+			return m, cmd
 		}
-		return m, nil
 	}
 
 	switch msg.String() {
@@ -376,6 +382,39 @@ func (m Model) viewQueryBuilder() string {
 		m.FieldInputs[field].Width = availableWidth
 	}
 
+	// Define styles
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#7D56F4")).
+		MarginBottom(1)
+
+	modeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888"))
+
+	subtitleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		MarginBottom(1)
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00ADD8")).
+		Width(12)
+
+	activeFieldStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#333333")).
+		Foreground(lipgloss.Color("#FFFFFF"))
+
+	inactiveFieldStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#CCCCCC"))
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888"))
+
+	errorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FF5555"))
+
+	loadingStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFD700"))
+
 	var b strings.Builder
 
 	modeStr := ""
@@ -385,9 +424,9 @@ func (m Model) viewQueryBuilder() string {
 		modeStr = " [INSERT]"
 	}
 
-	b.WriteString("T6 Asset Browser" + modeStr)
+	b.WriteString(titleStyle.Render("T6 Asset Browser") + modeStyle.Render(modeStr))
 	b.WriteString("\n")
-	b.WriteString("Configure your query below")
+	b.WriteString(subtitleStyle.Render("Configure your query below"))
 	b.WriteString("\n\n")
 
 	fieldLabels := map[QueryField]string{
@@ -403,22 +442,24 @@ func (m Model) viewQueryBuilder() string {
 		label := fieldLabels[field]
 		input := m.FieldInputs[field]
 
+		cursor := "  "
 		if field == m.ActiveField {
-			b.WriteString("> ")
-		} else {
-			b.WriteString("  ")
+			cursor = "> "
 		}
 
-		b.WriteString(label + ": ")
+		b.WriteString(cursor)
+		b.WriteString(labelStyle.Render(label + ": "))
 
 		if field == m.ActiveField {
-			b.WriteString(input.View())
+			b.WriteString(activeFieldStyle.Render(input.View()))
 		} else {
 			displayValue := input.Value()
 			if displayValue == "" {
 				displayValue = input.Placeholder
+				b.WriteString(helpStyle.Render(displayValue))
+			} else {
+				b.WriteString(inactiveFieldStyle.Render(displayValue))
 			}
-			b.WriteString(displayValue)
 		}
 		b.WriteString("\n")
 	}
@@ -426,14 +467,14 @@ func (m Model) viewQueryBuilder() string {
 	b.WriteString("\n")
 
 	if m.IsLoading {
-		loadingMsg := "Loading..."
+		loadingMsg := "⏳ Loading..."
 		if m.Query.Cmd == "export" {
-			loadingMsg = "Exporting assets..."
+			loadingMsg = "⏳ Exporting assets..."
 		}
-		b.WriteString(loadingMsg)
+		b.WriteString(loadingStyle.Render(loadingMsg))
 		b.WriteString("\n")
 	} else if m.Error != nil {
-		b.WriteString(fmt.Sprintf("Error: %v", m.Error))
+		b.WriteString(errorStyle.Render(fmt.Sprintf("❌ Error: %v", m.Error)))
 		b.WriteString("\n")
 	} else {
 		b.WriteString(m.StatusMessage)
@@ -441,9 +482,9 @@ func (m Model) viewQueryBuilder() string {
 
 	b.WriteString("\n")
 	if m.Mode == NormalMode && !m.IsLoading {
-		b.WriteString("i=insert | j/k=navigate | Enter=execute | ?=help | q=quit")
+		b.WriteString(helpStyle.Render("i=insert | j/k=navigate | Enter=execute | ?=help | q=quit"))
 	} else if m.Mode == InsertMode {
-		b.WriteString("INSERT mode | type to edit | Esc=normal mode")
+		b.WriteString(helpStyle.Render("INSERT mode | type to edit | Esc=normal mode"))
 	}
 
 	return b.String()
@@ -454,13 +495,47 @@ func (m Model) viewResultsScreen() string {
 		return "Terminal too small. Please resize to at least 40x10."
 	}
 
+	// Define styles
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#7D56F4")).
+		MarginBottom(1)
+
+	searchStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#333333")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		PaddingLeft(1).
+		PaddingRight(1)
+
+	resultItemStyle := lipgloss.NewStyle()
+
+	resultSelectedStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#7D56F4")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Bold(true)
+
+	typeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00ADD8"))
+
+	sourceStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888"))
+
+	statusStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#333333")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		PaddingLeft(1).
+		PaddingRight(1)
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888"))
+
 	var b strings.Builder
 
-	b.WriteString("Results")
+	b.WriteString(titleStyle.Render("Results"))
 	b.WriteString("\n")
 
 	if m.IsSearching {
-		b.WriteString("/" + m.SearchInput.View())
+		b.WriteString(searchStyle.Render("/" + m.SearchInput.View()))
 		b.WriteString("\n")
 	}
 
@@ -492,28 +567,34 @@ func (m Model) viewResultsScreen() string {
 		}
 
 		asset := m.FilteredResults[i]
-		line := fmt.Sprintf("[%s] %s (from %s)", asset.Type, asset.Name, asset.Source)
+
+		// Build styled line
+		line := fmt.Sprintf("[%s] %s (from %s)",
+			typeStyle.Render(asset.Type.String()),
+			asset.Name,
+			sourceStyle.Render(asset.Source))
 
 		if len(line) > maxLineWidth {
 			line = line[:maxLineWidth-3] + "..."
 		}
 
 		if i == m.Cursor {
-			b.WriteString("> " + line + "\n")
+			b.WriteString(resultSelectedStyle.Render(" " + line))
 		} else {
-			b.WriteString("  " + line + "\n")
+			b.WriteString(resultItemStyle.Render("  " + line))
 		}
+		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
-	status := fmt.Sprintf("%d/%d results | Cursor: %d", len(m.FilteredResults), len(m.Results), m.Cursor+1)
+	status := fmt.Sprintf(" %d/%d results | Cursor: %d ", len(m.FilteredResults), len(m.Results), m.Cursor+1)
 	if m.StatusMessage != "" && !m.IsSearching {
-		status = m.StatusMessage
+		status = " " + m.StatusMessage + " "
 	}
-	b.WriteString(status)
+	b.WriteString(statusStyle.Render(status))
 
 	b.WriteString("\n")
-	b.WriteString("j/k=navigate | g/G=top/bottom | /=search | y=copy | b/esc=back | ?=help | q=quit")
+	b.WriteString(helpStyle.Render("j/k=navigate | g/G=top/bottom | /=search | y=copy | b/esc=back | ?=help | q=quit"))
 
 	return b.String()
 }
@@ -523,63 +604,98 @@ func (m Model) viewHelpScreen() string {
 		return "Terminal too small. Please resize."
 	}
 
+	// Define styles
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#7D56F4")).
+		MarginBottom(1)
+	
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7D56F4")).
+		Padding(1).
+		Width(m.Width - 4)
+	
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00ADD8")).
+		Bold(true)
+	
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#CCCCCC"))
+	
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFD700")).
+		Bold(true).
+		MarginTop(1)
+	
+	footerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		MarginTop(1)
+
 	var b strings.Builder
 
-	b.WriteString("Help")
+	b.WriteString(titleStyle.Render("Help"))
 	b.WriteString("\n\n")
 
-	var helpText string
+	var content strings.Builder
+	
 	if m.Width >= 80 {
-		helpText = `Query Builder - Vim Modes:
-
-NORMAL Mode (default):
-  i, I                     Enter INSERT mode to edit field
-  j, down, k, up          Navigate between fields
-  Tab, Shift+Tab          Alternative navigation
-  Enter                   Execute the query
-  Ctrl+L                  Clear all fields
-  ? or h                  Show this help
-  q or Ctrl+C             Quit
-
-INSERT Mode (when editing):
-  Type characters         Enter text into the field
-  Esc                     Return to NORMAL mode
-  Ctrl+C                  Quit
-
-Results Screen:
-  j/down or k/up          Move cursor down/up
-  g                       Go to first result
-  G                       Go to last result
-  Ctrl+D                  Half page down
-  Ctrl+U                  Half page up
-  /                       Search in results
-  n/N                     Next/previous search result
-  y                       Copy current item name
-  b or Esc                Back to query builder
-  ? or h                  Show this help
-  q or Ctrl+C             Quit`
+		content.WriteString(sectionStyle.Render("Query Builder - Vim Modes:"))
+		content.WriteString("\n\n")
+		content.WriteString(keyStyle.Render("NORMAL Mode") + descStyle.Render(" (default):\n"))
+		content.WriteString("  " + keyStyle.Render("i, I") + descStyle.Render("                     Enter INSERT mode to edit field\n"))
+		content.WriteString("  " + keyStyle.Render("j, ↓, k, ↑") + descStyle.Render("              Navigate between fields\n"))
+		content.WriteString("  " + keyStyle.Render("Tab, Shift+Tab") + descStyle.Render("          Alternative navigation\n"))
+		content.WriteString("  " + keyStyle.Render("Enter") + descStyle.Render("                   Execute the query\n"))
+		content.WriteString("  " + keyStyle.Render("Ctrl+L") + descStyle.Render("                  Clear all fields\n"))
+		content.WriteString("  " + keyStyle.Render("? or h") + descStyle.Render("                  Show this help\n"))
+		content.WriteString("  " + keyStyle.Render("q or Ctrl+C") + descStyle.Render("             Quit\n"))
+		content.WriteString("\n")
+		content.WriteString(keyStyle.Render("INSERT Mode") + descStyle.Render(" (when editing):\n"))
+		content.WriteString("  " + descStyle.Render("Type characters         Enter text into the field\n"))
+		content.WriteString("  " + keyStyle.Render("Esc") + descStyle.Render("                     Return to NORMAL mode\n"))
+		content.WriteString("  " + keyStyle.Render("Ctrl+C") + descStyle.Render("                  Quit\n"))
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("Results Screen:"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("j/↓ or k/↑") + descStyle.Render("              Move cursor down/up\n"))
+		content.WriteString("  " + keyStyle.Render("g") + descStyle.Render("                       Go to first result\n"))
+		content.WriteString("  " + keyStyle.Render("G") + descStyle.Render("                       Go to last result\n"))
+		content.WriteString("  " + keyStyle.Render("Ctrl+D") + descStyle.Render("                  Half page down\n"))
+		content.WriteString("  " + keyStyle.Render("Ctrl+U") + descStyle.Render("                  Half page up\n"))
+		content.WriteString("  " + keyStyle.Render("/") + descStyle.Render("                       Search in results\n"))
+		content.WriteString("  " + keyStyle.Render("n/N") + descStyle.Render("                     Next/previous search result\n"))
+		content.WriteString("  " + keyStyle.Render("y") + descStyle.Render("                       Copy current item name\n"))
+		content.WriteString("  " + keyStyle.Render("b or Esc") + descStyle.Render("                Back to query builder\n"))
+		content.WriteString("  " + keyStyle.Render("? or h") + descStyle.Render("                  Show this help\n"))
+		content.WriteString("  " + keyStyle.Render("q or Ctrl+C") + descStyle.Render("             Quit\n"))
 	} else if m.Width >= 50 {
-		helpText = `Query Builder:
-  i=insert | j/k=nav | Enter=exec | Ctrl+L=clear | ?=help | q=quit
-
-INSERT Mode:
-  Type=edit | Esc=normal | Ctrl+C=quit
-
-Results Screen:
-  j/k=nav | g/G=top/bot | /=search | n/N=next/prev | y=copy
-  b/Esc=back | ?=help | q=quit`
+		content.WriteString(sectionStyle.Render("Query Builder:"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("i") + descStyle.Render("=insert  ") + keyStyle.Render("j/k") + descStyle.Render("=nav  ") + keyStyle.Render("Enter") + descStyle.Render("=exec  ") + keyStyle.Render("?") + descStyle.Render("=help  ") + keyStyle.Render("q") + descStyle.Render("=quit\n"))
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("INSERT Mode:"))
+		content.WriteString("\n")
+		content.WriteString("  " + descStyle.Render("Type=edit  ") + keyStyle.Render("Esc") + descStyle.Render("=normal  ") + keyStyle.Render("Ctrl+C") + descStyle.Render("=quit\n"))
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("Results Screen:"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("j/k") + descStyle.Render("=nav  ") + keyStyle.Render("g/G") + descStyle.Render("=top/bot  ") + keyStyle.Render("/") + descStyle.Render("=search  ") + keyStyle.Render("n/N") + descStyle.Render("=next/prev  ") + keyStyle.Render("y") + descStyle.Render("=copy\n"))
+		content.WriteString("  " + keyStyle.Render("b/Esc") + descStyle.Render("=back  ") + keyStyle.Render("?") + descStyle.Render("=help  ") + keyStyle.Render("q") + descStyle.Render("=quit\n"))
 	} else {
-		helpText = `Keys:
-  i=edit  j/k=move  Enter=go  ?=help  q=quit
-  Esc=normal  Ctrl+C=quit`
+		content.WriteString(sectionStyle.Render("Keys:"))
+		content.WriteString("\n")
+		content.WriteString("  " + keyStyle.Render("i") + descStyle.Render("=edit  ") + keyStyle.Render("j/k") + descStyle.Render("=move  ") + keyStyle.Render("Enter") + descStyle.Render("=go  ") + keyStyle.Render("?") + descStyle.Render("=help  ") + keyStyle.Render("q") + descStyle.Render("=quit\n"))
+		content.WriteString("  " + keyStyle.Render("Esc") + descStyle.Render("=normal  ") + keyStyle.Render("Ctrl+C") + descStyle.Render("=quit\n"))
 	}
 
-	b.WriteString(helpText)
+	b.WriteString(borderStyle.Render(content.String()))
 	b.WriteString("\n\n")
-	b.WriteString("Press q, esc, or ?/h to return")
+	b.WriteString(footerStyle.Render("Press q, esc, or ?/h to return"))
 
 	return b.String()
 }
+
 
 func (m *Model) updateViewport() {
 	if m.Cursor < m.Viewport.YOffset {
