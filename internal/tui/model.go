@@ -11,6 +11,20 @@ import (
 	"github.com/maxvanasten/t6-asset-browser/pkg/t6assets"
 )
 
+// normalizeString removes leading/trailing whitespace and normalizes indentation
+func normalizeString(s string) string {
+	return strings.TrimSpace(s)
+}
+
+// normalizeMultiline normalizes a multi-line string by trimming each line
+func normalizeMultiline(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // Screen represents the current view in the TUI
 type Screen int
 
@@ -560,15 +574,15 @@ func (m Model) viewQueryBuilder() string {
 
 		if field == m.ActiveField {
 			// Truncate input view if too long
-			inputView := input.View()
+			inputView := normalizeString(input.View())
 			if len(inputView) > availableWidth {
 				inputView = inputView[:availableWidth-3] + "..."
 			}
 			b.WriteString(fieldStyle.Render(inputView))
 		} else {
-			displayValue := input.Value()
+			displayValue := normalizeString(input.Value())
 			if displayValue == "" {
-				displayValue = input.Placeholder
+				displayValue = normalizeString(input.Placeholder)
 				b.WriteString(m.Styles.HelpText.Render(displayValue))
 			} else {
 				// Truncate display value if too long
@@ -593,14 +607,14 @@ func (m Model) viewQueryBuilder() string {
 		b.WriteString(m.Styles.LoadingText.Render(loadingMsg))
 		b.WriteString("\n")
 	} else if m.Error != nil {
-		errorMsg := fmt.Sprintf("❌ Error: %v", m.Error)
+		errorMsg := normalizeString(fmt.Sprintf("❌ Error: %v", m.Error))
 		if len(errorMsg) > m.Width-4 {
 			errorMsg = errorMsg[:m.Width-7] + "..."
 		}
 		b.WriteString(m.Styles.ErrorText.Render(errorMsg))
 		b.WriteString("\n")
 	} else {
-		statusMsg := m.StatusMessage
+		statusMsg := normalizeString(m.StatusMessage)
 		if len(statusMsg) > m.Width-4 {
 			statusMsg = statusMsg[:m.Width-7] + "..."
 		}
@@ -613,7 +627,7 @@ func (m Model) viewQueryBuilder() string {
 		if m.Width < 60 {
 			helpText = "i=insert • j/k=nav • Enter=run • ?=help • q=quit"
 		}
-		b.WriteString(m.Styles.HelpText.Render(helpText))
+		b.WriteString(m.Styles.HelpText.Render(normalizeMultiline(helpText)))
 	} else if m.Mode == InsertMode {
 		b.WriteString(m.Styles.HelpText.Render("INSERT mode • type to edit • Esc=normal mode"))
 	}
@@ -665,7 +679,7 @@ func (m Model) viewResultsScreen() string {
 		}
 
 		asset := m.FilteredResults[i]
-		line := fmt.Sprintf("[%s] %s (from %s)", asset.Type, asset.Name, asset.Source)
+		line := fmt.Sprintf("[%s] %s (from %s)", asset.Type, normalizeString(asset.Name), asset.Source)
 
 		// Truncate line if too long
 		if len(line) > maxLineWidth {
