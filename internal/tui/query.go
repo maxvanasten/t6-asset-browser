@@ -14,133 +14,73 @@ import (
 
 // ExecuteQuery executes a query based on the query configuration and returns assets
 func ExecuteQuery(zonePath string, query QueryConfig, useCache bool) ([]*t6assets.Asset, error) {
-	var registry *t6assets.Registry
-	var typeToFiles map[string][]string
+	registry := t6assets.NewRegistry()
 
-	// When map is specified, skip cache and process only matching files
-	// This is faster than loading 300k assets from cache then filtering
-	if useCache && query.Map == "" {
-		// Only use cache for queries without map filter
-		regCache, err := fastfile.NewRegistryCacheManager()
-		if err == nil {
-			ffFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
-			startLoad := time.Now()
-			cachedReg, valid := regCache.LoadRegistry(zonePath, ffFiles)
-			if valid {
-				registry = cachedReg.Registry
-				typeToFiles = cachedReg.TypeToFiles
-				fmt.Fprintf(os.Stderr, "Loaded %d assets from cache in %v\n", len(registry.Assets), time.Since(startLoad))
-			}
-		}
-	}
+	// Determine which files to process based on the query
+	var filesToProcess []string
 
-	// If no cache or map filter specified, process only needed files
-	if registry == nil {
-		registry = t6assets.NewRegistry()
+	if query.Map != "" {
+		// Get all available .ff files first
+		allFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
 
-		// Determine which files to process based on the query
-		var filesToProcess []string
+		// Process all files that contain any of the specified map names
+		mapList := strings.Split(query.Map, ",")
+		for _, ffPath := range allFiles {
+			_, fileName := filepath.Split(ffPath)
 
-		if query.Map != "" {
-			// Get all available .ff files first
-			allFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
+			// Check if this file matches any of the requested map patterns
+			for _, m := range mapList {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					// Remove .ff extension if present for matching
+					searchTerm := m
+					if strings.HasSuffix(searchTerm, ".ff") {
+						searchTerm = searchTerm[:len(searchTerm)-3]
+					}
 
-			// Process all files that contain any of the specified map names
-			mapList := strings.Split(query.Map, ",")
-			for _, ffPath := range allFiles {
-				_, fileName := filepath.Split(ffPath)
-
-				// Check if this file matches any of the requested map patterns
-				for _, m := range mapList {
-					m = strings.TrimSpace(m)
-					if m != "" {
-						// Remove .ff extension if present for matching
-						searchTerm := m
-						if strings.HasSuffix(searchTerm, ".ff") {
-							searchTerm = searchTerm[:len(searchTerm)-3]
-						}
-
-						// Check if filename contains the map name
-						if strings.Contains(fileName, searchTerm) {
-							filesToProcess = append(filesToProcess, ffPath)
-							break // Don't add same file multiple times
-						}
+					// Check if filename contains the map name
+					if strings.Contains(fileName, searchTerm) {
+						filesToProcess = append(filesToProcess, ffPath)
+						break // Don't add same file multiple times
 					}
 				}
 			}
 		}
 
-		// If no specific maps or files not found, process all files
-		if len(filesToProcess) == 0 {
-			filesToProcess, _ = filepath.Glob(filepath.Join(zonePath, "*.ff"))
-		}
-
-		if err := indexFilesParallel(filesToProcess, registry, useCache); err != nil {
-			return nil, fmt.Errorf("failed to index FastFiles: %w", err)
-		}
-
-		// Only save to cache if we processed all files (not a subset)
-		if useCache && query.Map == "" {
-			regCache, err := fastfile.NewRegistryCacheManager()
-			if err == nil {
-				ffFiles, _ := filepath.Glob(filepath.Join(zonePath, "*.ff"))
-				if err := regCache.SaveRegistry(zonePath, registry, ffFiles); err == nil {
-					fmt.Fprintf(os.Stderr, "Cached %d assets\n", len(registry.Assets))
-				}
-			}
+		if len(filesToProcess) > 0 {
+			fmt.Fprintf(os.Stderr, "Processing %d files matching '%s'\n", len(filesToProcess), query.Map)
 		}
 	}
 
+	// If no specific maps or files not found, process all files
+	if len(filesToProcess) == 0 {
+		filesToProcess, _ = filepath.Glob(filepath.Join(zonePath, "*.ff"))
+		fmt.Fprintf(os.Stderr, "Processing all %d files\n", len(filesToProcess))
+	}
+
+	if err := indexFilesParallel(filesToProcess, registry, useCache); err != nil {
+		return nil, fmt.Errorf("failed to index FastFiles: %w", err)
+	}
+
+	// Filter results based on query
 	var results []*t6assets.Asset
-
-	// Simplified filtering:
-	// Case 1: Registry loaded from cache (no map filter) - use typeToFiles index if available
-	// Case 2: Files processed directly (map filter applied) - just filter by type/pattern
-	if typeToFiles != nil && query.Type != "" && query.Map == "" {
-		// Use type-to-files index from cache for efficient filtering
-		targetFiles := make(map[string]bool)
-		for _, t := range strings.Split(query.Type, ",") {
-			t = strings.TrimSpace(t)
-			if files, ok := typeToFiles[t]; ok {
-				for _, f := range files {
-					if !strings.HasSuffix(f, ".ff") {
-						f = f + ".ff"
-					}
-					targetFiles[f] = true
-				}
-			}
-		}
-		if len(targetFiles) > 0 {
-			results = filterAssetsSimple(registry, query, targetFiles)
-		} else {
-			results = []*t6assets.Asset{}
-		}
-	} else {
-		// Processed files directly OR no type filter - just apply filters
-		// Files are already filtered by map if specified
-		results = filterAssetsSimple(registry, query, nil)
+	switch query.Cmd {
+	case "list":
+		results = filterAssets(registry, query)
+	case "search":
+		results = filterAssets(registry, query)
+	default:
+		return nil, fmt.Errorf("unsupported command: %s", query.Cmd)
 	}
 
 	return results, nil
 }
 
-// filterAssetsSimple filters assets by type and pattern
-// If targetFiles is provided, only checks assets from those files
-func filterAssetsSimple(registry *t6assets.Registry, query QueryConfig, targetFiles map[string]bool) []*t6assets.Asset {
+// filterAssets filters assets based on query criteria
+func filterAssets(registry *t6assets.Registry, query QueryConfig) []*t6assets.Asset {
 	var results []*t6assets.Asset
 
 	for _, asset := range registry.Assets {
-		// If targetFiles specified, skip assets from other files
-		if targetFiles != nil {
-			source := asset.Source
-			if !strings.HasSuffix(source, ".ff") {
-				source = source + ".ff"
-			}
-			if !targetFiles[source] {
-				continue
-			}
-		}
-
 		// Apply type filter
 		if query.Type != "" {
 			typeList := strings.Split(query.Type, ",")
@@ -152,6 +92,28 @@ func filterAssetsSimple(registry *t6assets.Registry, query QueryConfig, targetFi
 				}
 			}
 			if !validTypes[asset.Type] {
+				continue
+			}
+		}
+
+		// Apply map filter (check if source contains map pattern)
+		if query.Map != "" {
+			mapList := strings.Split(query.Map, ",")
+			matched := false
+			for _, m := range mapList {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					searchTerm := m
+					if strings.HasSuffix(searchTerm, ".ff") {
+						searchTerm = searchTerm[:len(searchTerm)-3]
+					}
+					if strings.Contains(asset.Source, searchTerm) {
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
 				continue
 			}
 		}
@@ -176,7 +138,7 @@ func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache 
 		return fmt.Errorf("no files to process")
 	}
 
-	// Initialize traditional cache for raw decrypted data
+	// Initialize cache for raw decrypted data
 	var rawCache *fastfile.Cache
 	if useCache {
 		rawCache, _ = fastfile.NewCache()
@@ -190,125 +152,83 @@ func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache 
 
 	totalFiles := len(ffFiles)
 	startTime := time.Now()
-	fmt.Fprintf(os.Stderr, "Indexing %d FastFiles...\n", totalFiles)
 
-	// First pass: check which files are already cached
-	// Process cached files immediately (no need for workers)
-	var cachedAssets []*t6assets.Asset
-	var filesToProcess []string
-	var cachedCount int
+	// Create a worker pool
+	numWorkers := 4
+	if totalFiles < numWorkers {
+		numWorkers = totalFiles
+	}
 
+	// Channel for files to process
+	fileChan := make(chan string, totalFiles)
 	for _, ffPath := range ffFiles {
-		_, fileName := filepath.Split(ffPath)
+		fileChan <- ffPath
+	}
+	close(fileChan)
 
-		// Check if file is in raw cache
-		if useCache && rawCache != nil && rawCache.IsCached(ffPath) {
-			// Read from cache
-			zoneData, err := rawCache.ReadCached(ffPath)
-			if err == nil {
-				// Parse the cached data
-				tempRegistry := t6assets.NewRegistry()
-				parser := fastfile.NewParser(tempRegistry)
-				if err := parser.Parse(zoneData, fileName); err == nil {
-					for _, asset := range tempRegistry.Assets {
-						cachedAssets = append(cachedAssets, asset)
-					}
-					cachedCount++
-					fmt.Fprintf(os.Stderr, "[%d/%d] [cached] Indexed: %s (%d assets)\n",
-						cachedCount, totalFiles, fileName, len(tempRegistry.Assets))
-					continue
+	// Channel for results
+	type fileResult struct {
+		fileName string
+		assets   []*t6assets.Asset
+		err      error
+	}
+	resultChan := make(chan fileResult, totalFiles)
+
+	// Progress tracking
+	var processedCount int
+	var mu sync.Mutex
+
+	// Start workers
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			for ffPath := range fileChan {
+				_, fileName := filepath.Split(ffPath)
+
+				assets, err := processSingleFile(ffPath, fileName, oat, rawCache, useCache)
+
+				mu.Lock()
+				processedCount++
+				current := processedCount
+				mu.Unlock()
+
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[%d/%d] Error processing %s: %v\n",
+						current, totalFiles, fileName, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[%d/%d] Indexed: %s (%d assets)\n",
+						current, totalFiles, fileName, len(assets))
+				}
+
+				resultChan <- fileResult{
+					fileName: fileName,
+					assets:   assets,
+					err:      err,
 				}
 			}
-		}
-
-		// Not cached or cache read failed - needs processing
-		filesToProcess = append(filesToProcess, ffPath)
+		}(i)
 	}
 
-	// Add cached assets to registry
-	for _, asset := range cachedAssets {
-		registry.Add(asset)
-	}
+	// Close result channel when all workers are done
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
 
-	// Process non-cached files in parallel
-	if len(filesToProcess) > 0 {
-		// Create a worker pool
-		numWorkers := 4
-		if len(filesToProcess) < numWorkers {
-			numWorkers = len(filesToProcess)
-		}
-
-		// Channel for files to process
-		fileChan := make(chan string, len(filesToProcess))
-		for _, ffPath := range filesToProcess {
-			fileChan <- ffPath
-		}
-		close(fileChan)
-
-		// Channel for results
-		type fileResult struct {
-			fileName string
-			assets   []*t6assets.Asset
-			err      error
-		}
-		resultChan := make(chan fileResult, len(filesToProcess))
-
-		// Progress tracking
-		var processedCount int
-		var mu sync.Mutex
-
-		// Start workers
-		var wg sync.WaitGroup
-		for i := 0; i < numWorkers; i++ {
-			wg.Add(1)
-			go func(workerID int) {
-				defer wg.Done()
-
-				for ffPath := range fileChan {
-					_, fileName := filepath.Split(ffPath)
-
-					assets, err := processSingleFile(ffPath, fileName, oat, rawCache, useCache)
-
-					mu.Lock()
-					processedCount++
-					currentCount := cachedCount + processedCount
-					mu.Unlock()
-
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "[%d/%d] Error processing %s: %v\n",
-							currentCount, totalFiles, fileName, err)
-					} else {
-						fmt.Fprintf(os.Stderr, "[%d/%d] Indexed: %s (%d assets)\n",
-							currentCount, totalFiles, fileName, len(assets))
-					}
-
-					resultChan <- fileResult{
-						fileName: fileName,
-						assets:   assets,
-						err:      err,
-					}
-				}
-			}(i)
-		}
-
-		// Close result channel when all workers are done
-		go func() {
-			wg.Wait()
-			close(resultChan)
-		}()
-
-		// Collect results and add to registry
-		for result := range resultChan {
-			if result.err == nil {
-				for _, asset := range result.assets {
-					registry.Add(asset)
-				}
+	// Collect results and add to registry
+	for result := range resultChan {
+		if result.err == nil {
+			for _, asset := range result.assets {
+				registry.Add(asset)
 			}
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "Total: %d files processed (%d from cache), %d assets indexed in %v\n",
-		totalFiles, cachedCount, len(registry.Assets), time.Since(startTime))
+	fmt.Fprintf(os.Stderr, "Total: %d files processed, %d assets indexed in %v\n",
+		totalFiles, len(registry.Assets), time.Since(startTime))
 
 	return nil
 }
@@ -317,55 +237,40 @@ func indexFilesParallel(ffFiles []string, registry *t6assets.Registry, useCache 
 func processSingleFile(ffPath, fileName string, oat *fastfile.OATIntegration, rawCache *fastfile.Cache, useCache bool) ([]*t6assets.Asset, error) {
 	var assets []*t6assets.Asset
 
-	// Try raw cache FIRST (before OAT)
-	var zoneData []byte
-	if useCache && rawCache != nil && rawCache.IsCached(ffPath) {
-		data, err := rawCache.ReadCached(ffPath)
-		if err == nil {
-			zoneData = data
-		}
-	}
-
-	// If not in cache, try decryption methods
-	if zoneData == nil {
-		// Try OAT first (fastest method when available)
-		if oat.IsAvailable() {
-			assetNames, assetTypes, err := oat.ExtractAndParseZone(ffPath)
-			if err == nil && len(assetNames) > 0 {
-				// OAT succeeded - extract assets directly
-				for _, name := range assetNames {
-					assetType := parseOATAssetType(assetTypes[name])
-					assets = append(assets, &t6assets.Asset{
-						Name:   name,
-						Type:   assetType,
-						Source: fileName,
-					})
-				}
-				return assets, nil
+	// Try OAT first (fastest method)
+	if oat.IsAvailable() {
+		assetNames, assetTypes, err := oat.ExtractAndParseZone(ffPath)
+		if err == nil && len(assetNames) > 0 {
+			for _, name := range assetNames {
+				assetType := parseOATAssetType(assetTypes[name])
+				assets = append(assets, &t6assets.Asset{
+					Name:   name,
+					Type:   assetType,
+					Source: fileName,
+				})
 			}
-		}
-
-		// Fall back to built-in decryption
-		data, err := os.ReadFile(ffPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read file: %w", err)
-		}
-
-		reader := fastfile.NewReader()
-		decrypted, err := reader.Read(data)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt: %w", err)
-		}
-		zoneData = decrypted
-
-		// Cache the decrypted data
-		if useCache && rawCache != nil {
-			rawCache.WriteCache(ffPath, zoneData)
+			return assets, nil
 		}
 	}
 
-	// Parse assets from zone data (either from cache or built-in decryption)
-	// Create a temporary registry to collect assets from this file
+	// Fall back to built-in reader
+	data, err := os.ReadFile(ffPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	reader := fastfile.NewReader()
+	zoneData, err := reader.Read(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	// Cache the decrypted data
+	if useCache && rawCache != nil {
+		rawCache.WriteCache(ffPath, zoneData)
+	}
+
+	// Parse assets from zone data
 	tempRegistry := t6assets.NewRegistry()
 	parser := fastfile.NewParser(tempRegistry)
 
@@ -381,125 +286,47 @@ func processSingleFile(ffPath, fileName string, oat *fastfile.OATIntegration, ra
 	return assets, nil
 }
 
-// listAssets returns filtered assets for list command
-func listAssets(registry *t6assets.Registry, query QueryConfig) []*t6assets.Asset {
-	var assets []*t6assets.Asset
-
-	// Filter by map if specified
-	if query.Map != "" {
-		mapList := strings.Split(query.Map, ",")
-		validMaps := make(map[string]bool)
-		for _, m := range mapList {
-			m = strings.TrimSpace(m)
-			if m != "" {
-				if !strings.HasSuffix(m, ".ff") {
-					m = m + ".ff"
-				}
-				validMaps[m] = true
-			}
-		}
-
-		seen := make(map[string]bool)
-		for _, a := range registry.Assets {
-			if validMaps[a.Source] {
-				key := a.Name + "|" + a.Type.String()
-				if !seen[key] {
-					assets = append(assets, a)
-					seen[key] = true
-				}
-			}
-		}
-	} else {
-		for _, a := range registry.Assets {
-			assets = append(assets, a)
-		}
+// ExportToFile exports assets to a file in the specified format
+// Returns the number of assets exported and any error
+func ExportToFile(assets []*t6assets.Asset, format string, filename string) (int, error) {
+	file, err := os.Create(filename)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create file: %w", err)
 	}
+	defer file.Close()
 
-	// Filter by type
-	if query.Type != "" {
-		var filtered []*t6assets.Asset
-		typeList := strings.Split(query.Type, ",")
-		validTypes := make(map[t6assets.AssetType]bool)
-		for _, t := range typeList {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				validTypes[parseAssetType(t)] = true
-			}
-		}
-
+	switch format {
+	case "plain", "":
 		for _, a := range assets {
-			if validTypes[a.Type] {
-				filtered = append(filtered, a)
-			}
+			fmt.Fprintln(file, a.Name)
 		}
-		assets = filtered
-	}
-
-	// Filter by pattern
-	if query.Pattern != "" {
-		include, exclude := parsePatterns(query.Pattern)
-		var filtered []*t6assets.Asset
+	case "json":
+		fmt.Fprintln(file, "[")
+		for i, a := range assets {
+			comma := ","
+			if i == len(assets)-1 {
+				comma = ""
+			}
+			fmt.Fprintf(file, "  {\"name\": \"%s\", \"type\": \"%s\", \"source\": \"%s\"}%s\n",
+				a.Name, a.Type, a.Source, comma)
+		}
+		fmt.Fprintln(file, "]")
+	case "csv":
+		fmt.Fprintln(file, "name,type,source")
 		for _, a := range assets {
-			if matchesPatterns(a.Name, include, exclude, query.UseWildcard, query.IgnoreCase) {
-				filtered = append(filtered, a)
-			}
+			fmt.Fprintf(file, "%s,%s,%s\n", a.Name, a.Type, a.Source)
 		}
-		assets = filtered
+	case "gsc":
+		fmt.Fprintln(file, "array(")
+		for _, a := range assets {
+			fmt.Fprintf(file, "\t\"%s\",\n", a.Name)
+		}
+		fmt.Fprintln(file, ")")
+	default:
+		return 0, fmt.Errorf("unknown format: %s", format)
 	}
 
-	return assets
-}
-
-// searchAssets returns filtered assets for search command
-func searchAssets(registry *t6assets.Registry, query QueryConfig) []*t6assets.Asset {
-	var results []*t6assets.Asset
-
-	// Parse patterns once for efficiency
-	include, exclude := parsePatterns(query.Pattern)
-
-	for _, a := range registry.Assets {
-		// Check pattern match
-		if !matchesPatterns(a.Name, include, exclude, query.UseWildcard, query.IgnoreCase) {
-			continue
-		}
-
-		// Filter by type
-		if query.Type != "" {
-			typeList := strings.Split(query.Type, ",")
-			validTypes := make(map[t6assets.AssetType]bool)
-			for _, t := range typeList {
-				t = strings.TrimSpace(t)
-				if t != "" {
-					validTypes[parseAssetType(t)] = true
-				}
-			}
-			if !validTypes[a.Type] {
-				continue
-			}
-		}
-
-		// Filter by map
-		if query.Map != "" {
-			mapList := strings.Split(query.Map, ",")
-			validMaps := make(map[string]bool)
-			for _, m := range mapList {
-				m = strings.TrimSpace(m)
-				if m != "" {
-					if !strings.HasSuffix(m, ".ff") {
-						m = m + ".ff"
-					}
-					validMaps[m] = true
-				}
-			}
-			if !validMaps[a.Source] {
-				continue
-			}
-		}
-
-		results = append(results, a)
-	}
-
-	return results
+	return len(assets), nil
 }
 
 // Helper functions
@@ -632,47 +459,4 @@ func wildcardMatch(str, pattern string) bool {
 	}
 
 	return false
-}
-
-// ExportToFile exports assets to a file in the specified format
-// Returns the number of assets exported and any error
-func ExportToFile(assets []*t6assets.Asset, format string, filename string) (int, error) {
-	file, err := os.Create(filename)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-
-	switch format {
-	case "plain", "":
-		for _, a := range assets {
-			fmt.Fprintln(file, a.Name)
-		}
-	case "json":
-		fmt.Fprintln(file, "[")
-		for i, a := range assets {
-			comma := ","
-			if i == len(assets)-1 {
-				comma = ""
-			}
-			fmt.Fprintf(file, "  {\"name\": \"%s\", \"type\": \"%s\", \"source\": \"%s\"}%s\n",
-				a.Name, a.Type, a.Source, comma)
-		}
-		fmt.Fprintln(file, "]")
-	case "csv":
-		fmt.Fprintln(file, "name,type,source")
-		for _, a := range assets {
-			fmt.Fprintf(file, "%s,%s,%s\n", a.Name, a.Type, a.Source)
-		}
-	case "gsc":
-		fmt.Fprintln(file, "array(")
-		for _, a := range assets {
-			fmt.Fprintf(file, "\t\"%s\",\n", a.Name)
-		}
-		fmt.Fprintln(file, ")")
-	default:
-		return 0, fmt.Errorf("unknown format: %s", format)
-	}
-
-	return len(assets), nil
 }
