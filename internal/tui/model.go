@@ -464,6 +464,7 @@ func (m Model) viewResultsScreen() string {
 		b.WriteString("\n")
 	}
 
+	// Calculate visible lines
 	availableHeight := m.Height - 8
 	if m.IsSearching {
 		availableHeight -= 2
@@ -472,21 +473,19 @@ func (m Model) viewResultsScreen() string {
 		availableHeight = 5
 	}
 
-	var content strings.Builder
-	start := m.Viewport.YOffset
-	end := start + availableHeight
-	if end > len(m.FilteredResults) {
-		end = len(m.FilteredResults)
-	}
-	if start < 0 {
-		start = 0
-	}
-
 	maxLineWidth := m.Width - 4
 	if maxLineWidth < 30 {
 		maxLineWidth = 30
 	}
 
+	// Calculate which items to show
+	start := m.Viewport.YOffset
+	end := start + availableHeight
+	if end > len(m.FilteredResults) {
+		end = len(m.FilteredResults)
+	}
+
+	// Build visible content
 	for i := start; i < end; i++ {
 		if i >= len(m.FilteredResults) {
 			break
@@ -498,19 +497,13 @@ func (m Model) viewResultsScreen() string {
 		if len(line) > maxLineWidth {
 			line = line[:maxLineWidth-3] + "..."
 		}
-		line += "\n"
 
 		if i == m.Cursor {
-			content.WriteString("> " + line)
+			b.WriteString("> " + line + "\n")
 		} else {
-			content.WriteString("  " + line)
+			b.WriteString("  " + line + "\n")
 		}
 	}
-
-	m.Viewport.Width = m.Width - 2
-	m.Viewport.Height = availableHeight
-	m.Viewport.SetContent(content.String())
-	b.WriteString(m.Viewport.View())
 
 	b.WriteString("\n")
 	status := fmt.Sprintf("%d/%d results | Cursor: %d", len(m.FilteredResults), len(m.Results), m.Cursor+1)
