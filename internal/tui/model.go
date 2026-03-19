@@ -20,6 +20,14 @@ const (
 	HelpScreen
 )
 
+// Mode represents vim-like modes
+type Mode int
+
+const (
+	NormalMode Mode = iota
+	InsertMode
+)
+
 // QueryField represents a configurable query parameter
 type QueryField int
 
@@ -36,6 +44,7 @@ const (
 type Model struct {
 	// Core state
 	Screen   Screen
+	Mode     Mode
 	Registry *t6assets.Registry
 	ZonePath string
 	UseCache bool
@@ -183,6 +192,7 @@ func NewModel(zonePath string, useCache bool) Model {
 
 	return Model{
 		Screen:          QueryBuilderScreen,
+		Mode:            NormalMode,
 		Registry:        t6assets.NewRegistry(),
 		ZonePath:        zonePath,
 		UseCache:        useCache,
@@ -196,7 +206,7 @@ func NewModel(zonePath string, useCache bool) Model {
 		Cursor:          0,
 		SearchInput:     &searchInput,
 		IsSearching:     false,
-		StatusMessage:   "Configure your query and press Enter to execute",
+		StatusMessage:   "Press 'i' to edit field, '?' for help",
 		IsLoading:       false,
 		Styles:          DefaultStyles(),
 	}
@@ -214,20 +224,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// First, update the active text input to capture typed characters
-		if m.Screen == QueryBuilderScreen {
-			activeInput := m.FieldInputs[m.ActiveField]
-			newInput, cmd := activeInput.Update(msg)
-			*m.FieldInputs[m.ActiveField] = newInput
-			cmds = append(cmds, cmd)
-		} else if m.Screen == ResultsScreen && m.IsSearching {
-			newInput, cmd := m.SearchInput.Update(msg)
-			*m.SearchInput = newInput
-			cmds = append(cmds, cmd)
-			m.filterResults()
-		}
-
-		// Then handle navigation keys
+		// Handle screen-specific updates
 		switch m.Screen {
 		case QueryBuilderScreen:
 			return m.updateQueryBuilder(msg)
@@ -252,6 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Cursor = 0
 			m.StatusMessage = fmt.Sprintf("Found %d results", len(m.Results))
 			m.Screen = ResultsScreen
+			m.Mode = NormalMode
 		}
 	}
 
@@ -274,24 +272,62 @@ func (m Model) View() string {
 
 // updateQueryBuilder handles key events in query builder screen
 func (m Model) updateQueryBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// In INSERT mode, pass keys to text input (except Esc to exit)
+	if m.Mode == InsertMode {
+		switch msg.String() {
+		case "esc":
+			m.Mode = NormalMode
+			m.StatusMessage = "NORMAL mode - press 'i' to edit, '?' for help"
+			return m, nil
+		case "ctrl+c":
+			return m, tea.Quit
+		default:
+			// Pass key to text input
+			activeInput := m.FieldInputs[m.ActiveField]
+			newInput, cmd := activeInput.Update(msg)
+			*m.FieldInputs[m.ActiveField] = newInput
+			return m, cmd
+		}
+	}
+
+	// In NORMAL mode, handle vim navigation
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 
-	case "tab", "down":
-		// Move to next field (only use Tab/Down arrows, not j/k)
-		m.ActiveField = m.Fields[(int(m.ActiveField)+1)%len(m.Fields)]
+	case "i", "I":
+		// Enter INSERT mode
+		m.Mode = InsertMode
+		m.StatusMessage = "INSERT mode - type to edit, Esc for Normal mode"
 		m.FieldInputs[m.ActiveField].Focus()
 		return m, nil
 
-	case "shift+tab", "up":
-		// Move to previous field (only use Shift+Tab/Up arrows, not k)
+	case "j", "down":
+		// Move to next field
+		m.ActiveField = m.Fields[(int(m.ActiveField)+1)%len(m.Fields)]
+		return m, nil
+
+	case "k", "up":
+		// Move to previous field
 		idx := int(m.ActiveField) - 1
 		if idx < 0 {
 			idx = len(m.Fields) - 1
 		}
 		m.ActiveField = m.Fields[idx]
-		m.FieldInputs[m.ActiveField].Focus()
+		return m, nil
+
+	case "tab":
+		// Alternative navigation: next field
+		m.ActiveField = m.Fields[(int(m.ActiveField)+1)%len(m.Fields)]
+		return m, nil
+
+	case "shift+tab":
+		// Alternative navigation: previous field
+		idx := int(m.ActiveField) - 1
+		if idx < 0 {
+			idx = len(m.Fields) - 1
+		}
+		m.ActiveField = m.Fields[idx]
 		return m, nil
 
 	case "enter":
@@ -436,7 +472,14 @@ func (m Model) updateHelpScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) viewQueryBuilder() string {
 	var b strings.Builder
 
-	b.WriteString(m.Styles.Title.Render("T6 Asset Browser"))
+	// Show mode indicator in title
+	modeStr := ""
+	if m.Mode == NormalMode {
+		modeStr = " [NORMAL]"
+	} else {
+		modeStr = " [INSERT]"
+	}
+	b.WriteString(m.Styles.Title.Render("T6 Asset Browser" + modeStr))
 	b.WriteString("\n")
 	b.WriteString(m.Styles.Subtitle.Render("Configure your query below"))
 	b.WriteString("\n\n")
@@ -492,7 +535,11 @@ func (m Model) viewQueryBuilder() string {
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(m.Styles.HelpText.Render("Press Enter to execute • Tab/↓/↑ to navigate • ? for help • q to quit"))
+	if m.Mode == NormalMode {
+		b.WriteString(m.Styles.HelpText.Render("i=insert • j/k=navigate • Enter=execute • ?=help • q=quit"))
+	} else {
+		b.WriteString(m.Styles.HelpText.Render("INSERT mode • type to edit • Esc=normal mode"))
+	}
 
 	return b.String()
 }
@@ -561,14 +608,23 @@ func (m Model) viewHelpScreen() string {
 	b.WriteString("\n\n")
 
 	helpText := `
-Query Builder Keys:
-  Tab/↓ or Shift+Tab/↑     Navigate between fields
+Query Builder - Vim Modes:
+
+NORMAL Mode (default):
+  i, I                      Enter INSERT mode to edit field
+  j, ↓, k, ↑               Navigate between fields
+  Tab, Shift+Tab           Alternative navigation
   Enter                    Execute the query
   Ctrl+L                   Clear all fields
   ? or h                   Show this help
   q or Ctrl+C              Quit
 
-Results Screen Keys:
+INSERT Mode (when editing):
+  Type characters          Enter text into the field
+  Esc                      Return to NORMAL mode
+  Ctrl+C                   Quit
+
+Results Screen:
   j/↓ or k/↑               Move cursor down/up
   g                        Go to first result
   G                        Go to last result

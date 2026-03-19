@@ -99,13 +99,21 @@ t6-assets -tui
 
 ### TUI Controls
 
-**Query Builder:**
-- `Tab` or `↓` - Navigate to next field
-- `Shift+Tab` or `↑` - Navigate to previous field
+The TUI features vim-like modal editing:
+
+**Query Builder - NORMAL Mode:**
+- `i`, `I` - Enter INSERT mode to edit the current field
+- `j` or `↓` - Navigate to next field
+- `k` or `↑` - Navigate to previous field
+- `Tab` / `Shift+Tab` - Alternative navigation
 - `Enter` - Execute query
 - `Ctrl+L` - Clear all fields
 - `?` or `h` - Show help
 - `q` or `Ctrl+C` - Quit
+
+**Query Builder - INSERT Mode:**
+- Type freely to enter text
+- `Esc` - Return to NORMAL mode
 
 **Results Screen:**
 - `j` or `↓` - Navigate down
