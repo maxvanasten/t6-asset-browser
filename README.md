@@ -139,6 +139,50 @@ $ t6-assets -cmd=list -map=zm_tomb -type=weapon -pattern=raygun
 Total: 4 assets
 ```
 
+### Example 2c: List Excluding Upgraded Weapons (Anti-Pattern)
+
+```bash
+$ t6-assets -cmd=list -map=zm_tomb -type=weapon -pattern='!upgraded'
+
+[weapon] hamr_zm (from zm_tomb.ff)
+[weapon] galil_zm (from zm_tomb.ff)
+[weapon] ak74u_zm (from zm_tomb.ff)
+[weapon] mp40_zm (from zm_tomb.ff)
+...
+
+Total: 48 assets (excluding upgraded variants)
+```
+
+**Note:** Use single quotes around anti-patterns to prevent bash from interpreting `!` as history expansion.
+
+### Example 2d: List with Multiple Patterns (AND Logic)
+
+Use comma-separated patterns to match assets that contain **all** patterns:
+
+```bash
+$ t6-assets -cmd=list -map=zm_tomb -type=weapon -pattern='raygun,upgraded'
+
+[weapon] ray_gun_upgraded_zm (from zm_tomb.ff)
+[weapon] raygun_mark2_upgraded_zm (from zm_tomb.ff)
+
+Total: 2 assets (weapons with both 'raygun' AND 'upgraded' in name)
+```
+
+### Example 2e: Combined Include and Exclude Patterns
+
+Mix positive and negative patterns to fine-tune results:
+
+```bash
+$ t6-assets -cmd=list -map=zm_tomb -type=weapon -pattern='upgraded,!staff'
+
+[weapon] ray_gun_upgraded_zm (from zm_tomb.ff)
+[weapon] raygun_mark2_upgraded_zm (from zm_tomb.ff)
+[weapon] hamr_upgraded_zm (from zm_tomb.ff)
+...
+
+Total: 24 assets (upgraded weapons but NOT staff weapons)
+```
+
 ### Example 3: Search for Raygun Variants
 
 ```bash
@@ -217,6 +261,19 @@ array(
 )
 ```
 
+### Example 7c: Export with Multiple Patterns
+
+```bash
+$ t6-assets -cmd=export -map=zm_tomb -type=weapon -pattern='upgraded,!staff' -format=gsc
+
+array(
+	"870mcs_upgraded_zm",
+	"ak74u_extclip_upgraded_zm",
+	"ak74u_upgraded_zm",
+	...
+)
+```
+
 ### Example 8: List All Assets from a Map
 
 ```bash
@@ -280,7 +337,7 @@ galil_upgraded_zm
 | `-cmd` | Command to run | index |
 | `-map` | Map name filter | (none) |
 | `-type` | Asset type filter | (none) |
-| `-pattern` | Pattern to filter asset names | (none) |
+| `-pattern` | Pattern(s) to filter asset names. Use comma for AND logic, `!` prefix to exclude | (none) |
 | `-i` | Case-insensitive pattern matching | false |
 | `-wildcard` | Use wildcards (* and ?) in pattern | false |
 | `-format` | Export format | plain |

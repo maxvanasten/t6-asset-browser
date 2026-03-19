@@ -334,21 +334,10 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType, pattern strin
 
 	// Filter by pattern if specified
 	if pattern != "" {
+		include, exclude := parsePatterns(pattern)
 		var filtered []*t6assets.Asset
 		for _, a := range assets {
-			var matched bool
-			if useWildcard {
-				if ignoreCase {
-					matched = wildcardMatch(strings.ToLower(a.Name), strings.ToLower(pattern))
-				} else {
-					matched = wildcardMatch(a.Name, pattern)
-				}
-			} else if ignoreCase {
-				matched = containsIgnoreCase(a.Name, pattern)
-			} else {
-				matched = strings.Contains(a.Name, pattern)
-			}
-			if matched {
+			if matchesPatterns(a.Name, include, exclude, useWildcard, ignoreCase) {
 				filtered = append(filtered, a)
 			}
 		}
@@ -369,21 +358,12 @@ func listAssets(registry *t6assets.Registry, sourceMap, assetType, pattern strin
 func searchAssets(registry *t6assets.Registry, pattern, assetType, sourceMap string, ignoreCase bool, sortBy string, useWildcard bool) {
 	var results []*t6assets.Asset
 
+	// Parse patterns once for efficiency
+	include, exclude := parsePatterns(pattern)
+
 	for _, a := range registry.Assets {
-		// Check pattern match
-		var matched bool
-		if useWildcard {
-			if ignoreCase {
-				matched = wildcardMatch(strings.ToLower(a.Name), strings.ToLower(pattern))
-			} else {
-				matched = wildcardMatch(a.Name, pattern)
-			}
-		} else if ignoreCase {
-			matched = containsIgnoreCase(a.Name, pattern)
-		} else {
-			matched = strings.Contains(a.Name, pattern)
-		}
-		if !matched {
+		// Check pattern match using the new helper
+		if !matchesPatterns(a.Name, include, exclude, useWildcard, ignoreCase) {
 			continue
 		}
 
@@ -493,21 +473,10 @@ func exportAssets(registry *t6assets.Registry, sourceMap, assetType, pattern str
 
 	// Filter by pattern if specified
 	if pattern != "" {
+		include, exclude := parsePatterns(pattern)
 		var filtered []*t6assets.Asset
 		for _, a := range assets {
-			var matched bool
-			if useWildcard {
-				if ignoreCase {
-					matched = wildcardMatch(strings.ToLower(a.Name), strings.ToLower(pattern))
-				} else {
-					matched = wildcardMatch(a.Name, pattern)
-				}
-			} else if ignoreCase {
-				matched = containsIgnoreCase(a.Name, pattern)
-			} else {
-				matched = strings.Contains(a.Name, pattern)
-			}
-			if matched {
+			if matchesPatterns(a.Name, include, exclude, useWildcard, ignoreCase) {
 				filtered = append(filtered, a)
 			}
 		}
@@ -658,6 +627,72 @@ func sortAssets(assets []*t6assets.Asset, sortBy string) {
 		}
 	}
 	// If sortBy is not recognized, leave unsorted (defaults to name order from index)
+}
+
+// parsePatterns parses a comma-separated pattern string into include and exclude patterns
+// Example: "upgraded,staff" -> include: ["upgraded", "staff"], exclude: []
+// Example: "upgraded,!staff" -> include: ["upgraded"], exclude: ["staff"]
+func parsePatterns(pattern string) (include []string, exclude []string) {
+	if pattern == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(pattern, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.HasPrefix(part, "!") {
+			exclude = append(exclude, part[1:])
+		} else {
+			include = append(include, part)
+		}
+	}
+	return include, exclude
+}
+
+// matchesPatterns checks if a string matches all include patterns and none of the exclude patterns
+func matchesPatterns(str string, include []string, exclude []string, useWildcard bool, ignoreCase bool) bool {
+	// Check all include patterns (AND logic - all must match)
+	for _, pattern := range include {
+		var matched bool
+		if useWildcard {
+			if ignoreCase {
+				matched = wildcardMatch(strings.ToLower(str), strings.ToLower(pattern))
+			} else {
+				matched = wildcardMatch(str, pattern)
+			}
+		} else if ignoreCase {
+			matched = containsIgnoreCase(str, pattern)
+		} else {
+			matched = strings.Contains(str, pattern)
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	// Check all exclude patterns (AND logic - none must match)
+	for _, pattern := range exclude {
+		var matched bool
+		if useWildcard {
+			if ignoreCase {
+				matched = wildcardMatch(strings.ToLower(str), strings.ToLower(pattern))
+			} else {
+				matched = wildcardMatch(str, pattern)
+			}
+		} else if ignoreCase {
+			matched = containsIgnoreCase(str, pattern)
+		} else {
+			matched = strings.Contains(str, pattern)
+		}
+		if matched {
+			return false
+		}
+	}
+
+	return true
 }
 
 // wildcardMatch matches a string against a pattern with * and ? wildcards
