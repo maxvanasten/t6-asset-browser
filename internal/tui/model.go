@@ -100,6 +100,7 @@ type Styles struct {
 	HelpText       lipgloss.Style
 	StatusBar      lipgloss.Style
 	ErrorText      lipgloss.Style
+	LoadingText    lipgloss.Style
 	ResultItem     lipgloss.Style
 	ResultSelected lipgloss.Style
 	SearchBox      lipgloss.Style
@@ -140,6 +141,12 @@ func DefaultStyles() Styles {
 		ErrorText: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FF5555")).
 			Bold(true),
+		LoadingText: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFD700")).
+			Background(lipgloss.Color("#333333")).
+			Bold(true).
+			PaddingLeft(1).
+			PaddingRight(1),
 		ResultItem: lipgloss.NewStyle().
 			PaddingLeft(2),
 		ResultSelected: lipgloss.NewStyle().
@@ -357,6 +364,8 @@ func (m Model) updateQueryBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "enter":
 		// Execute query
+		m.IsLoading = true
+		m.StatusMessage = "Loading..."
 		return m, m.executeQuery()
 
 	case "?", "h":
@@ -574,9 +583,17 @@ func (m Model) viewQueryBuilder() string {
 
 	b.WriteString("\n")
 
-	// Status/error messages
-	if m.Error != nil {
-		errorMsg := fmt.Sprintf("Error: %v", m.Error)
+	// Status/error/loading messages
+	if m.IsLoading {
+		// Show prominent loading indicator
+		loadingMsg := "⏳ Loading..."
+		if m.Query.Cmd == "export" {
+			loadingMsg = "⏳ Exporting assets..."
+		}
+		b.WriteString(m.Styles.LoadingText.Render(loadingMsg))
+		b.WriteString("\n")
+	} else if m.Error != nil {
+		errorMsg := fmt.Sprintf("❌ Error: %v", m.Error)
 		if len(errorMsg) > m.Width-4 {
 			errorMsg = errorMsg[:m.Width-7] + "..."
 		}
@@ -590,14 +607,14 @@ func (m Model) viewQueryBuilder() string {
 		b.WriteString(m.Styles.StatusBar.Render(statusMsg))
 	}
 
-	b.WriteString("\n\n")
-	if m.Mode == NormalMode {
+	b.WriteString("\n")
+	if m.Mode == NormalMode && !m.IsLoading {
 		helpText := "i=insert • j/k=navigate • Enter=execute • ?=help • q=quit"
 		if m.Width < 60 {
 			helpText = "i=insert • j/k=nav • Enter=run • ?=help • q=quit"
 		}
 		b.WriteString(m.Styles.HelpText.Render(helpText))
-	} else {
+	} else if m.Mode == InsertMode {
 		b.WriteString(m.Styles.HelpText.Render("INSERT mode • type to edit • Esc=normal mode"))
 	}
 
