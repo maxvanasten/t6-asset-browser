@@ -517,13 +517,18 @@ func (m Model) updateHelpScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // viewQueryBuilder renders the query builder screen
 func (m Model) viewQueryBuilder() string {
-	// Calculate available width for input fields
-	availableWidth := m.Width - 20 // Account for margins, label (12), padding, etc.
-	if availableWidth < 20 {
-		availableWidth = 20
+	// Check if terminal is too small
+	if m.Width < 40 || m.Height < 15 {
+		return "Terminal too small. Please resize to at least 40x15."
 	}
-	if availableWidth > 60 {
-		availableWidth = 60
+
+	// Calculate available width for input fields - constrain more on small terminals
+	availableWidth := m.Width - 15 // Account for cursor (2) + label (12) + padding
+	if availableWidth < 10 {
+		availableWidth = 10
+	}
+	if availableWidth > 50 {
+		availableWidth = 50
 	}
 
 	// Update input widths
@@ -639,6 +644,11 @@ func (m Model) viewQueryBuilder() string {
 
 // viewResultsScreen renders the results screen
 func (m Model) viewResultsScreen() string {
+	// Check if terminal is too small
+	if m.Width < 40 || m.Height < 10 {
+		return "Terminal too small. Please resize to at least 40x10."
+	}
+
 	var b strings.Builder
 
 	b.WriteString(m.Styles.Title.Render("Results"))
@@ -669,10 +679,10 @@ func (m Model) viewResultsScreen() string {
 		start = 0
 	}
 
-	// Calculate max line width
-	maxLineWidth := m.Width - 6 // Account for margins and cursor indicator
-	if maxLineWidth < 40 {
-		maxLineWidth = 40
+	// Calculate max line width - be more conservative on small terminals
+	maxLineWidth := m.Width - 4 // Minimal padding
+	if maxLineWidth < 30 {
+		maxLineWidth = 30 // Absolute minimum
 	}
 
 	for i := start; i < end; i++ {
@@ -697,7 +707,7 @@ func (m Model) viewResultsScreen() string {
 	}
 
 	// Update viewport content
-	m.Viewport.Width = m.Width - 4
+	m.Viewport.Width = m.Width - 2
 	m.Viewport.Height = availableHeight
 	m.Viewport.SetContent(content.String())
 	b.WriteString(m.Viewport.View())
@@ -725,6 +735,11 @@ func (m Model) viewResultsScreen() string {
 
 // viewHelpScreen renders the help screen
 func (m Model) viewHelpScreen() string {
+	// Check if terminal is too small
+	if m.Width < 30 || m.Height < 10 {
+		return "Terminal too small. Please resize."
+	}
+
 	var b strings.Builder
 
 	b.WriteString(m.Styles.Title.Render("Help"))
@@ -759,7 +774,7 @@ Results Screen:
   b or Esc                Back to query builder
   ? or h                  Show this help
   q or Ctrl+C             Quit`
-	} else {
+	} else if m.Width >= 50 {
 		helpText += `NORMAL Mode:
   i=insert • j/k=nav • Enter=exec • Ctrl+L=clear • ?=help • q=quit
 
@@ -769,6 +784,11 @@ INSERT Mode:
 Results Screen:
   j/k=nav • g/G=top/bot • /=search • n/N=next/prev • y=copy
   b/Esc=back • ?=help • q=quit`
+	} else {
+		// Very narrow terminal
+		helpText += `Keys:
+  i=edit  j/k=move  Enter=go  ?=help  q=quit
+  Esc=normal  Ctrl+C=quit`
 	}
 
 	helpText += `
